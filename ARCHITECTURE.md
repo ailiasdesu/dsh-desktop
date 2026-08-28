@@ -312,7 +312,7 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
 | 5 | **性能好** | Tauri 复用系统 WebView2：不携带 Chromium，壳层安装包 2–5MB 级 / 常驻内存 20–60MB 量级（对比 Electron 85–110MB 包 + 100–200MB 内存）；内核 node 进程（40–80MB）为功能必需且与壳解耦；release + strip + lto | research-stack §4（量级证据，M1 后实测回填） | ✅ 定稿（数值待回填） |
 | 附 | **目标产出：Windows 安装包 + 源码仓库** | 仓库见 §2.1；GitHub Actions 构建 + NSIS 产物（M5 可选 CI 发布流水线）；无签名首发（SmartScreen 提示，决策点 D7） | research-stack §9（M5/R9） | ✅ 计划 |
 
-**验收指标（来自 research-stack §9，施工期实测回填）**：托盘常驻；双击第二实例 → 聚焦首实例；退出后任务管理器无残留 node（Job Object 兜底）；内核崩溃自动重启 ≤2 次；静默启动无控制台。安装包体积见 §9 D6（壳层 ≤15MB 与整体含内核 ≤250MB 分开定义）。
+**验收指标（来自 research-stack §9，施工期实测回填）**：托盘常驻；双击第二实例 → 聚焦首实例；退出后任务管理器无残留 node（Job Object 兜底）；内核崩溃自动重启 ≤2 次；静默启动无控制台。整体安装包（方案 B 全捆绑）以 ≤250MB 为目标（D6 已拍板；未裁剪当前全捆绑体积见 t5 交付实测）。
 
 ---
 
@@ -325,7 +325,7 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
 | D3 | WebView2 安装策略 | 推荐 embedBootstrapper（离线可装，+1.8MB） | research-stack §8 R3 |
 | D4 | DSH_HOME | **默认共享 ~/.dsh**；隔离模式做设置项（不首发） | research-core §6 两方案均成立 |
 | D5 | 更新后旧版本保留 | 保留最近 1 份（回滚友好），可配置删除 | §6.2 |
-| D6 | 安装包体积口径 | **壳层 ≤15MB** 与 **整体（壳+node+裁剪内核）<220–250MB** 分列；M1 实测回填 | research-stack §9（原指标未区分，需修正） |
+| D6 | 安装包体积口径 | **✅ 用户已拍板 2026-08-29：方案 B 全捆绑**——安装包直接含壳+node 运行时+官方内核（~220-250MB），即装即用离线完整；注意：安装包捆绑≠更新机制变化，运行时版本跟随（Registry→tgz→原子替换→重启/回滚）保持不变 | 用户拍板，与任务描述合并为准 |
 | D7 | 代码签名 | 首发无签名（用户体验折中）；正式发布前购 EV 证书 | research-stack §8 R9 |
 | D8 | 深链/开机自启 | 二期（M5）再上；一期仅托盘+单实例 | research-stack §8 R6/M5 |
 
