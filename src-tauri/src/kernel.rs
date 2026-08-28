@@ -240,7 +240,11 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
     let _ = settings.save(data_dir);
 
     let res = match resolve_paths(&settings, &exe_dir, data_dir) {
-        Ok(r) => r,
+        Ok(r) => {
+            // 验收证据：打印实际解析到的 node/内核路径（随包 vs 全局）
+            eprintln!("[kernel] resolved node={} bin={}", r.node.display(), r.bin.display());
+            r
+        }
         Err(e) => {
             eprintln!("[kernel] resolve failed: {e}");
             if !smoke {
