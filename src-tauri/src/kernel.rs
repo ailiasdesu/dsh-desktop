@@ -232,7 +232,7 @@ fn spawn_kernel(
 }
 
 /// 启动 → 就绪 → 窗口 → 崩溃重启 → 停止（阻塞至退出）
-pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &Path) {
+pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &Path) -> i32 {
     let exe_dir = std::env::current_exe()
         .map(|p| p.parent().map(|d| d.to_path_buf()).unwrap_or_default())
         .unwrap_or_default();
@@ -255,7 +255,7 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
                     ),
                 );
             }
-            return;
+            return if smoke { 2 } else { 0 };
         }
     };
 
@@ -266,14 +266,22 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
         eprintln!("[kernel] write_patch failed: {e}");
     }
 
+    let mut exit_code = 0;
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
             break;
         }
         match launch_once(&app, &ctl, &res, &settings, smoke) {
+            LaunchOutcome::SmokeFail => {
+                exit_code = 2;
+                break;
+            }
             LaunchOutcome::Stopped => break,
             LaunchOutcome::Restart => {
                 // 更新流：内核已停止，此刻执行原子替换（§5.2 步骤④）
+                // P0-13：restart 标志必须先复位——否则新内核就绪后阶段2立读 restart=true，
+                // 再次 graceful_stop → 无限 spawn→杀→spawn 环路（更新端到端必死）。
+                ctl.restart.store(false, Ordering::SeqCst);
                 let pending = ctl.update_path.lock().unwrap().take();
                 if let Some(_kernel_new) = pending {
                     let root = kernel_root_of(&res.bin);
@@ -341,18 +349,22 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
                         "DSH Desktop - 内核反复崩溃",
                         "DSH 内核短时间内连续崩溃，已停止自动重启。\n请检查更新或查看日志后重试。",
                     );
+                } else {
+                    exit_code = 2; // P1-3：冒烟失败必须非零退出
                 }
                 break;
             }
         }
     }
-    eprintln!("[kernel] shell loop exit");
+    eprintln!("[kernel] shell loop exit (code {exit_code})");
+    exit_code
 }
 
 enum LaunchOutcome {
     Exited,
     Stopped,
     Restart,
+    SmokeFail,
 }
 
 fn launch_once(
@@ -379,12 +391,13 @@ fn launch_once(
         Ok(c) => c,
         Err(e) => {
             eprintln!("[kernel] spawn failed: {e}");
-            if !smoke {
-                crate::jobobject::show_error(
-                    "DSH Desktop - 内核启动失败",
-                    &format!("{e}\n\n请检查 node/kernel 路径配置（settings.json）。"),
-                );
+            if smoke {
+                return LaunchOutcome::SmokeFail;
             }
+            crate::jobobject::show_error(
+                "DSH Desktop - 内核启动失败",
+                &format!("{e}\n\n请检查 node/kernel 路径配置（settings.json）。"),
+            );
             return LaunchOutcome::Stopped;
         }
     };
@@ -437,19 +450,34 @@ fn launch_once(
                 if Instant::now() >= deadline {
                     eprintln!("[kernel] ready timeout(30s)");
                     graceful_stop(&mut child, job.as_ref(), None);
-                    return LaunchOutcome::Exited;
+                    return if smoke {
+                        LaunchOutcome::SmokeFail
+                    } else {
+                        LaunchOutcome::Exited
+                    };
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
         if child.try_wait().ok().flatten().is_some() {
             eprintln!("[kernel] exited before ready");
-            return LaunchOutcome::Exited;
+            return if smoke {
+                LaunchOutcome::SmokeFail
+            } else {
+                LaunchOutcome::Exited
+            };
         }
     }
     let port = match port {
         Some(p) => p,
-        None => return LaunchOutcome::Exited,
+        None => {
+            eprintln!("[kernel] no ready port");
+            return if smoke {
+                LaunchOutcome::SmokeFail
+            } else {
+                LaunchOutcome::Exited
+            };
+        }
     };
     *ctl.port.lock().unwrap() = Some(port);
     eprintln!("[kernel] ready on port {port}");

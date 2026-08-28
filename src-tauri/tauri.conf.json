@@ -32,6 +32,7 @@
       "../desktop/quit.js": "desktop/quit.js",
       "../desktop/health.js": "desktop/health.js",
       "../runtime/node.exe": "runtime/node.exe",
+      "../runtime/node_modules/npm": "runtime/node_modules/npm",
       "../kernel": "kernel"
     },
     "windows": {

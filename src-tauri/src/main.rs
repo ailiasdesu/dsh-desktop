@@ -114,7 +114,30 @@ fn spawn_update(app: tauri::AppHandle, ctl: Arc<KernelCtl>) {
 
 fn main() {
     let smoke = std::env::args().any(|a| a == "--smoke");
+    let update_check = std::env::args().any(|a| a == "--update-check");
     let ctl = Arc::new(KernelCtl::default());
+
+    // 无界面检查（交互证据/CI 用）：打印当前 vs registry latest，不弹窗不下载
+    if update_check {
+        let exe_dir = std::env::current_exe()
+            .map(|p| p.parent().map(|d| d.to_path_buf()).unwrap_or_default())
+            .unwrap_or_default();
+        let data_dir = std::env::var("APPDATA")
+            .map(|a| std::path::PathBuf::from(a).join("com.dshdesktop.app"))
+            .unwrap_or_else(|_| std::env::temp_dir().join("dsh-desktop"));
+        let settings = settings::AppSettings::load(&data_dir);
+        match kernel::resolve_kernel_root(&settings, &exe_dir) {
+            Ok(root) => {
+                let cur = updater::current_version(&root).unwrap_or_else(|| "?".into());
+                match updater::check_latest(&root) {
+                    None => println!("UPDATE_CHECK: up-to-date (current={cur} == registry latest)"),
+                    Some(info) => println!("UPDATE_CHECK: available version={} (current={cur})", info.version),
+                }
+            }
+            Err(e) => println!("UPDATE_CHECK: error {e}"),
+        }
+        std::process::exit(0);
+    }
 
     let ctl_tray = ctl.clone();
 
@@ -158,9 +181,9 @@ fn main() {
         updated_version: ctl.updated_version.clone(),
     };
     std::thread::spawn(move || {
-        kernel::run_shell(handle, kernel_ctl, smoke, &data_dir);
-        // 内核线程结束 = 壳可退出
-        std::process::exit(0);
+        let code = kernel::run_shell(handle, kernel_ctl, smoke, &data_dir);
+        // 内核线程结束 = 壳可退出（--smoke 失败时非零退出码，P1-3）
+        std::process::exit(code);
     });
 
     app.run(move |_app_handle, event| match event {

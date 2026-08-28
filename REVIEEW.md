@@ -1,116 +1,83 @@
-# DSH Desktop 验收评审报告（t6）
+# DSH Desktop 验收评审报告（t6→t9 复核版）
 
-- 评审人：reviewer（架构/质检/验收） · 团队任务 t6 · 日期：2026-08-29
-- 评审基线：`dsh desktop版 以及dsh插件制作/dsh-desktop`，评审期间 HEAD 持续推进：
-  - 评审起点 6e68738（M1+M2+M4/NSIS）
-  - 评审中新增提交 80ac3c8（D6 方案B 拍板 docs）/ 28d3e67（t5 全捆绑 NSIS）/ c914b07（README 更新机制改为「设计定稿/实现待办」）
-  - 未提交工作区：Cargo.toml（新增 tray-icon feature + sha2/base64/flate2/tar）+ updater.rs（272 行，未接线）
-- 报告文件名按任务原文 REVIEEW.md 输出（疑似 REVIEW.md 笔误，建议更正）
-- 全部实测均使用隔离 DSH_HOME / 临时目录，未触碰用户 ~/.dsh；测试安装（两次）均已卸载并清理
+- 评审人：reviewer（架构/质检/验收） · 日期：2026-08-29（t9 复核）
+- **复核基线：HEAD = 7e0d79e（M3+M4：托盘+hide-to-tray+updater 接线与回滚）+ c3c1a37（evidence：内核解析路径日志）**，即评审起点 c914b07 之后的 M3/M4 集成状态。
+- 环境：engineer 正在并行修复 P0（捆绑 npm）与 P1-3（smoke 退出码）——工作区 kernel.rs/main.rs/updater.rs/tauri.conf.json 有未提交改动，本报告按「已提交 HEAD 为准 + 两项标记修复中」记录，未改动任何 src。
+- 产物：src-tauri/target/release/bundle/nsis/DSH Desktop_0.1.0_x64-setup.exe（20:57 构建，≈HEAD 代码，**未含 runtime/npm**——npm 于 21:01 才入树，属修复中项）。
+- 全部实测使用隔离 DSH_HOME / 临时目录，未触碰用户 ~/.dsh；测试安装已卸载清理。
+- 本版修订：①表头基线说明 ②①项判定（机制已实现、端到端受限）③已关闭项勾销（P0-1/P1-4/P0-2 机制版）④新增 P0-13 等缺陷。
 
 ---
 
-## 0. 验收结论（一句话）
+## 0. 结论（一句话）
 
-**壳层核心链路（属主内核：spawn→就绪→窗口→/health→/quit→无残留→单实例→崩溃限次重启）实测全部通过；「全捆绑 NSIS 安装包」（28d3e67 提交）已由本评审重新打包+装机冒烟验证可用（50MB 安装器，解包 356MB 布局正确）；但「跟随官方更新」虽已有 updater.rs 初稿，dry-run 实测证明其更新流程在真实 npm tarball 上必然失败（tgz 不含 node_modules → 冒烟 ERR_MODULE_NOT_FOUND），且未接线、未提交；托盘仍缺失（Cargo.toml 已加 tray-icon feature，无实现代码）。** 五条要求：①❌ ②✅ ③✅ ④✅（当前 HEAD 已验证） ⑤✅。
+**M3（托盘/隐藏）与 M4（更新机制全链路）已提交并编译/单测/契约级验证通过；「全捆绑安装包」在 HEAD 产物上再次装机冒烟通过（SMOKE_OK port=11827，安装布局 bundled 路径解析证据成立）；hide-to-tray 实测（窗口关闭进程存活+内核保留）与 JobObject 硬杀回收实测通过。** 但代码走查发现 **P0-13：更新重启标志（restart）永不复位 → 更新后内核将被无限 kill/relaunch，更新功能端到端必坏**；另有「捆绑 npm 路径不匹配」（修复中）在工作区已见修复方向。因此 **①（跟随官方更新）判定：机制已实现（材料化依赖+sha512+isolated 冒烟+原子替换+崩溃回滚），但因 P0-13 与 npm 路径未通，端到端尚不可用——不能判「已实现」**，待修复+P0 重打包后官方出新包实测。
 
-## 1. 五条要求逐项验收
+## 1. 五条要求逐项（复核版）
 
-| # | 要求 | 判定 | 实测证据 |
+| # | 要求 | 判定（t6→t9） | 关键证据 |
 |---|---|---|---|
-| ① | 跟随官方更新内核 | ❌ 未实现/不可用 | updater.rs（未提交未接线）初稿存在：check_latest / verify_tarball / extract_tarball / smoke_kernel / apply_swap / rollback / run_update_flow。**但 dry-run 实测必败**：npm tgz 仅含 lib/config/package.json（33KB，实测无 node_modules）→ extract 后 kernel.new 无依赖 → smoke `node bin.js web --help` 直接 `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/dsh-app-boot'（实测复现）→ 更新永远报「更新失败」。其余问题：fetch 依赖外部 curl；update_channel/keep_old_kernel 设置项仍未接入（写死 latest）；无 UI/托盘触发点；main.rs 无 `mod updater`（不编译，纯死文件） |
-| ② | 性能好 | ✅ | 壳 WS≈27MB（28,221,440 B）、exe 7.9MB（strip+lto）；内核 node WS≈111MB（功能必需）；无 Chromium；启动到就绪 <12s。安装器 50MB（全捆绑，实测）、解包 356MB（kernel 260MB + runtime 89MB + 壳 8MB）——远优于 Electron 方案；D6「<220–250MB」以「安装器体积」口径达成（50MB），以「解包 footprint」口径未达成（356MB），建议 README 明确口径（ARCHITECTURE §9 原文即口径分裂，见 P2-8） |
-| ③ | 非纯 web 套皮 | ✅ | 进程属主（Rust spawn/kill）/ 单实例 / Job Object 防孤儿 / 端口管理 / 崩溃重启 / 退出清理全原生 Rust；WebView2 仅作视口加载内核官方前端；内核零修改（官方 CLI + 官方 --patch 机制） |
-| ④ | 有安装包可安装 | ✅（当前 HEAD 全捆绑版） | 已提交产物（6e68738，3.44MB）**安装即坏**（实测复现：资源落位 `_up_\desktop\` + 内核/Node 未捆绑 → ERR_MODULE_NOT_FOUND → 崩溃×3）。28d3e67 全捆绑修复后由本评审**重新打包装机验证**：布局 desktop/{quit,health}.js + kernel/ + runtime/node.exe + exe + uninstall.exe 正确；`--smoke` → `SMOKE health=true port=10543 / SMOKE_OK` ✓；卸载干净 ✓。安装器 50MB（原 3.44MB 壳版仍可作「薄壳形态」备选） |
-| ⑤ | 双击启动无需 shell | ✅ | windows_subsystem="windows" 无控制台；Start-Process/双击 → 窗口「DSH Desktop」（MainWindowHandle 实测）；子进程 CREATE_NO_WINDOW；全捆绑后干净机器可用（不需要 Node/npm 预装） |
+| ① | 跟随官方更新内核 | ⚠️ 机制已实现 / 端到端受限 | HEAD：updater.rs 已 `mod updater` 接线 + 托盘「检查更新」触发；materialize_dependencies（npm install --omit=dev 物化依赖树，修复 tgz 无 node_modules 问题）+ sha512 integrity + 隔离 DSH_HOME 冒烟 + apply_swap/rollback + 崩溃循环自动回滚，cargo test 3/3（integrity/网络失败安全返回/就绪行）。**但**：①P0-13 restart 永不复位→更新后内核无限重启环路；②捆绑 npm 路径不匹配（updater 找 `<node_dir>/npm-cli.js`，实际为 `runtime/npm/index.js`，工作区修复中）；③registry latest=0.1.1-rc.2=捆绑版本，无更新可端到端触发（待官方出新版） |
+| ② | 性能好 | ✅ | 壳 WS≈25-28MB、exe 8.35MB（HEAD，含托盘/更新代码）、无 Chromium；安装器 50.4MB（HEAD 产物实测）、解包 356MB/29,488 文件；启动到就绪 <12s |
+| ③ | 非纯 web 套皮 | ✅ | 进程属主/单实例/Job Object/端口管理/崩溃重启/托盘/更新全原生 Rust；WebView2 仅视口 |
+| ④ | 有安装包可安装 | ✅（HEAD 产物复验） | 20:57 全捆绑 NSIS（50.4MB）安装 → 布局 desktop/{quit,health}.js+kernel(260MB)+runtime/node.exe+exe+uninstall 正确 → 安装态 smoke `SMOKE health=true port=11827 / SMOKE_OK / EXIT=0` + **bundled 路径证据**（resolved node=…`DSH Desktop\runtime\node.exe bin=…`kernel\lib\bin.js）→ 卸载干净（目录+注册表）。注：该产物未含 runtime/npm（修复中项），重打包后需复验一次 |
+| ⑤ | 双击启动无需 shell | ✅ | windows_subsystem 无控制台；GUI 启动窗口「DSH Desktop」；子进程 CREATE_NO_WINDOW；关闭→隐藏托盘（进程存活）；托盘「退出」为唯一退出路径 |
 
-## 2. 运行时验证记录（DSH_HOME 隔离，两次安装均实测后卸载）
+## 2. 复核实测记录（全部基于 HEAD）
 
-### 2.1 dev 布局 smoke — ✅
-`DSH_HOME=<temp> src-tauri/target/release/dsh-desktop.exe --smoke` → `SMOKE health=true port=7415 / SMOKE_OK / EXIT=0`；就绪契约 stdout `dsh web: http://127.0.0.1:7415` ↔ parse_port_from_line 一致；cargo test 1/1 通过。
+1. **cargo test**（vcvars64 环境）：3/3 通过——kernel::parse_ready_line ✓ updater::integrity_roundtrip ✓ updater::check_latest_none_on_network_fail ✓。
+2. **dev 布局 --smoke**（20:57 release exe，隔离 DSH_HOME）：`SMOKE health=true port=5439 / SMOKE_OK / EXIT=0`；新 evidence 行 `[kernel] resolved node=…`runtime\node.exe bin=…`kernel\lib\bin.js` ✓（c3c1a37 验收证据落地）。
+3. **updater 冒烟契约**：`runtime/node.exe kernel/lib/bin.js web --help` → exit 0 ✓（隔离 DSH_HOME，smoke_kernel 判据成立）。
+4. **M3 托盘/hide-to-tray**（GUI 运行）：窗口出现；WM_CLOSE（=点 X）→ **进程存活（PID 24432）+ 内核子进程（7256）保留 = 隐藏到托盘 ✓**；托盘由 build_tray（TrayIconBuilder+show/check/quit 菜单+TrayHandle 保活）在 setup 中构建，进程存活即构建成功（失败会 setup Err 退出）；菜单点击无法程序化触发，为代码级验证（show→聚焦 / check→spawn_update / quit→ctl.stop）。
+5. **JobObject 硬杀回收**：`taskkill /F` 杀壳 → 4s 内内核 node 消失，无残留 ✓（防孤儿兜底再次实证）。
+6. **安装包（HEAD 产物）**：/S 安装 → 布局正确 → 安装态 smoke `SMOKE_OK port=11827` + bundled 路径证据 ✓ → uninstall /S 干净（目录+注册表均除）✓。
+7. **更新流程代码走查**（关键）：
+   - materialize_dependencies：tgz 骨架（33KB）→ `npm install --omit=dev --no-audit --no-fund` 物化 ~250MB 依赖树 → 冒烟 → 原子替换 → 崩溃回滚——机制链条补齐（t6 的 P0-2「tgz 无 node_modules 必败」已在机制上关闭）。
+   - **P0-13（新发现）**：`ctl.restart` 仅在 spawn_update（main.rs:107）`store(true)`，全工程无任何 `store(false)`；内核线程 Restart 分支处理完 take(update_path)+apply_swap 后 continue，下一轮 launch_once 阶段2 立即读到 restart=true → graceful_stop → 再次 Restart（此时 update_path 已 None，跳过 swap）→ **无限「spawn→杀→spawn」环路**，更新永远无法稳定运行（每次循环 ~就绪耗时）。
+   - **npm 路径不匹配（P0 修复中）**：HEAD 的 materialize_dependencies 找 `node.parent()/npm-cli.js`（runtime/npm-cli.js）——实测不存在；实际入口 `node runtime/npm/index.js install…`（实测 --version → 11.13.0 ✓）。故捆绑环境回退 `cmd /C npm`（干净机器无 npm → 更新失败）。工作区已见整改（runtime/npm 入树 + resources 加 `../runtime/npm`）。
+   - apply_swap/rollback：rename 序列 + 验证 + 失败自动回退 ✓（代码级）；崩溃循环回滚：`cur==uv && crash_count>=2`（600s 窗口）✓（存在旧崩溃污染计数的边界，见 P3-11）。
+8. **registry 状态**：latest=0.1.1-rc.2=捆绑版本 → 「检查更新」路径当前结果为「已是最新版本」；无端到端更新事件可测（待官方出新版，或用 mock registry 集成测试）。
 
-### 2.2 GUI 启动 — ✅
-窗口「DSH Desktop」（PID 14256）；内核 spawn 契约完整：runtime/node.exe + kernel/lib/bin.js web --patch %APPDATA%\com.dshdesktop.app\desktop.patch.yml --no-open --port 0；--port 0 → 动态端口 13797（netstat 实测）；GET /health → 200 "ok"。
+## 3. 问题清单（复核版）
 
-### 2.3 单实例 — ✅
-第二实例 0.29s 退出；仅剩 1 壳 + 1 内核；聚焦回调存在（聚焦动作无法程序化断言）。
+### ✅ 已关闭（勾销自 t6）
+- **P0-1 安装产物不可用** → 28d3e67 全捆绑修复，t9 复核再次装机冒烟通过（§2.6）。
+- **P1-4 托盘缺失** → M3 已实现（TrayIconBuilder+菜单+hide-to-tray 实测，§2.4）；README/架构声明与实际相符。
+- **P0-2「跟随官方更新完全缺失」** → 机制级已实现（§2.7 链条），但整体判定见①/P0-13。
+- **P2-9 文档过度声明** → 已缓解（README 已描述更新实现；**残留**：README「当前里程碑 M1+M2，t4」仍是旧值，需更新为 M1-M4——P2-E）。
 
-### 2.4 用户退出（窗口 X）— ✅
-WM_CLOSE → ExitRequested → ctl.stop → /quit → 内核优雅退出 → 壳退出；8s 后壳+内核 node 全部消失，无残留（/quit + Job Object 双保险）。
+### 🔧 修复中（engineer 并行，勿动）
+- **P0-A 捆绑 npm 闭环**：runtime/npm 已加入 + tauri.conf resources 已加 `../runtime/npm`；但 20:57 产物未含 npm、updater 引用路径待改为 `runtime/npm/index.js`（或捆绑 npm-cli.js）；完成标志=重打包 + 装机冒烟 + 更新 dry-run 通过。
+- **P1-3 smoke 失败假成功（EXIT=0）**：HEAD main.rs 仍 `process::exit(0)`（成功/失败路径同码）；工作区已修改，待复验：失败路径 exit≠0、成功打印 SMOKE_OK 后 exit 0。
 
-### 2.5 内核生命周期 — ✅（含观察项）
-- 崩溃→自动重启（退避 1s/5s）→ 窗口重定向到新端口 → 健康；限次 2 次后收敛放弃 + 错误对话框（安装版崩溃×3 场景验证）。
-- 观察项：任何内核退出（含外部 /quit）均计「崩溃」入重启队列（P3-11）；GUI 模式壳 eprintln 全部丢失无处可查（P1-5）；首起内核曾有 1 次异常退出后自动重启成功（原因无法从日志定位，印证 P1-5）。
+### ❌ 新增 P0-13：更新后无限重启环路（P0，更新即触发）
+restart 标志无复位点（全工程仅有 store(true)）；导致 apply_swap 后新内核立刻被停、无限循环重启。**修复建议**：在 run_shell 的 Restart 分支完成 update_path take 后执行 `ctl.restart.store(false, SeqCst)`（或 launch_once 返回 Restart 前置 false）；并补回归测试（模拟 restart=true → 期望只重启一次后 restart 复位）。
 
-### 2.6 安装包（旧提交 6e68738）— ❌ 安装即坏（复现，见 §1 ④）
-静默安装 → 资源落 `_up_\desktop\`；`--smoke` → 内核 3 次 `ERR_MODULE_NOT_FOUND …desktop\health.js` → `crashed too many times, giving up` → **EXIT=0（假成功，P1-3）**。
+### ❌ 开放（P2/P3）
+- **P1-5 壳诊断日志无落盘**（开放）：GUI/double-click 下 eprintln 全部丢失（本轮 smoke 经 bash 继承句柄可见，双击场景不可见）；kernel.log 无轮转。建议 shell.log+5MB 轮转；JobObject assign 失败需显式告警。
+- **P2-6 MODULE_TYPELESS_PACKAGE_JSON 警告**（开放）：desktop/ 无 package.json {"type":"module"}，每次内核启动警告；建议加 package.json 资源或改 .mjs。
+- **P2-7 file_url 空格编码**（开放）：安装目录 "DSH Desktop" 含空格，file_url 不做百分号编码；建议主动 encode。
+- **P2-8 体积口径**（开放）：实测安装器 50.4MB/解包 356MB/29,488 文件；README「200-250MB」与 D6「<220-250MB」口径均与实际不符（安装器口径 50MB 达标）；建议回填实测 + 明确口径（另：内核未裁剪，后续按 §5.3 再降）。
+- **P2-10 构建指引**（开放）：cargo test/run 需 vcvars64（coreutils link 劫持+LNK1181），README 未写。
+- **P3-11 崩溃计数边界**（开放）：更新后回滚判定 `crash_count>=2` 含更新前崩溃（600s 窗口混计），可能提前回滚；建议按「更新后」单独计数。
+- **P3-12 updater 测试覆盖**（开放）：仅 2 测；未覆盖 materialize/smoke/apply_swap/rollback/restart 标志（若补测可提前抓出 P0-13）；建议 mock registry 集成测试。
+- **P2-16 settings 死字段**（开放）：update_channel/keep_old_kernel 仍未接入（updater 硬编码 latest；apply_swap 无条件清理旧 kernel.old，与 keep_old_kernel=true 默认违背）。
 
-### 2.7 安装包（新提交 28d3e67 全捆绑，本评审重打包复验）— ✅
-50MB 安装器 /S → `%LOCALAPPDATA%\DSH Desktop\`：desktop/{quit,health}.js、kernel/（260MB，29,488 文件）、runtime/node.exe（89MB）、dsh-desktop.exe、uninstall.exe → 安装态 smoke `SMOKE health=true port=10543 / SMOKE_OK / EXIT=0` ✓ → 卸载清理 ✓。**结论：P0-1 已随 28d3e67 修复并验证。**
+## 4. 通过项（复核后保留）
+1. 内核 spawn/就绪/端口契约与实测一致；bundled 路径解析（开发/安装两布局）证据落地。
+2. /quit 优雅停止 + JobObject 兜底；退出/硬杀均无残留（两轮实测）。
+3. 单实例（第二实例快速退出+聚焦回调，t6 实测）。
+4. 限次崩溃重启 + 更新后崩溃自动回滚（代码级验证）。
+5. M3：托盘构建成功、hide-to-tray 实测（关闭≠退出）、托盘菜单接线完整。
+6. 全捆绑安装包装机可用：布局正确、安装态 smoke 通过（port=11827）、卸载干净。
+7. 壳静态体积极小（8.35MB exe/25-28MB WS），无 Chromium；updater 材料化依赖+sha512+isolated 冒烟+原子替换+回滚链条成立。
+8. cargo test 3/3（含 updater 单测）；web --help 冒烟契约实测 exit 0。
 
-### 2.8 更新流程 dry-run（对 updater.rs 全流程）— ❌ 必然失败
-以真实 tarball `@deepseek-ai/dsh-0.1.1-rc.2.tgz`（33KB）复现 updater.rs 逻辑：下载 ✓ → integrity 字段存在（sha512-…）✓ → 解压 `package/` 后**无 node_modules**（tar 列表实测 0 条）→ `node kernel.new/lib/bin.js web --help` → `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/dsh-app-boot'（实测报错）→ 冒烟返回非 0 → run_update_flow 报「更新失败」。**系统是安全失败（不破坏现有 kernel），但功能不可用**。修复方向见 P0-2。
+## 5. 判定汇总（t9 复核版）
+- ① 跟随官方更新：**⚠️ 机制已实现并验证（单测/契约/代码走查），端到端不可用**：P0-13（重启环路）+ P0-A（捆绑 npm 路径，修复中）→ 待修后官方出新包实测（建议同时用 mock registry 跑通全链路集成测试）。
+- ② 性能：✅ 达标（数字见 §1）。
+- ③ 非纯 web 套皮：✅ 达标。
+- ④ 安装包可安装：✅ 达标（HEAD 产物复验；P0-A 重打包后需再复验一次）。
+- ⑤ 双击启动无需 shell：✅ 达标（含 hide-to-tray 语义）。
 
-### 2.9 构建/测试环境
-cargo test 1/1 通过（须 vcvars64 环境；git bash 直跑复现双坑：coreutils link 劫持 + LNK1181 缺 kernel32.lib）。已知坑已属团队记忆，但 README 未写演练指引（P2-10）。
-
-## 3. 问题清单（严重度 + 修复建议）
-
-### P0-1 ✅已修复（28d3e67，本评审验证）安装产物资源落位 + 内核/Node 未捆绑
-原提交产物安装即坏（§2.6 全复现）；28d3e67 resources 对象映射 + kernel/runtime 全捆绑后，本评审重打包装机验证通过（§2.7）。遗留建议：① CI/交付门禁加「产物安装→--smoke→退出无残留」自动化（当前产物验证靠手工）；② 更稳健替代（可选）：quit.js/health.js 改 include_str! 内嵌 + 运行时写入 data_dir，彻底摆脱安装目录布局推断。
-
-### P0-2 ❌未移交（有初稿）「跟随官方更新」不可用
-见 §2.8——updater.rs 全流程 dry-run 必败（tgz 无依赖）。修复方向（择一）：
-a) 更新时在 kernel.new 上执行 `npm install --omit=dev --no-fund`（依赖目标机 npm，与「免 npm」设计冲突，需评估）；
-b) **推荐**：采用「全量捆绑包」更新源（自建分发，每次发布打包含 node_modules 的完整包）——与 D6 方案B 一致；
-c) 官方包若提供含依赖的集成发布物则改用它。
-同时：接线（main.rs mod updater + 触发器：托盘菜单/设置页/启动后台检查）、fetch 去 curl 依赖（reqwest+rustls 或复用内核网络栈）、接入 update_channel（写死 latest）、keep_old_kernel 策略接入。
-
-### P1-3 ❌ smoke 失败假成功（EXIT=0）
-resolve 失败/崩溃放弃路径均 `process::exit(0)`；安装版崩溃×3 实测 EXIT=0（无 SMOKE_OK）。**所有自动化验收依赖此信号**。修复：失败路径 exit 非 0（如 2），成功打印 SMOKE_OK 后 exit 0。
-
-### P1-4 ❌ 托盘缺失
-Cargo.toml 已加 `tray-icon` feature，但无 tray.rs/无 TrayIconBuilder 代码（grep 实测）；当前窗口关闭=整体退出。修复：M3 实现托盘（显示/检查更新/退出 + close→hide 语义）；README 已由 c914b07 改为「设计/待办」，需功能落地后回改。
-
-### P1-5 ❌ 壳层诊断日志丢失（GUI 子系统无控制台）
-kernel.rs 全部 eprintln（ready port/崩溃计数/失败原因）无落盘；仅内核 stderr 进 kernel.log（append，无 5MB 轮转）。修复：壳日志写 data_dir/logs/shell.log + 轮转；Job Object assign 失败需告警（当前仅 eprintln=静默丢防孤儿）。
-
-### P2-6 MODULE_TYPELESS_PACKAGE_JSON 警告（每次内核启动，实测 3 条）
-修复：desktop/ 加 package.json {"type":"module"}（随资源分发）或改用 .mjs。
-
-### P2-7 安装目录含空格（"DSH Desktop"）
-file_url() 不做百分号编码；实测 node 自行 %20 转义未出问题（本次失败是文件缺失所致）；修复布局后待回归确认（建议 file_url 主动 encode，顺带消除隐患）。
-
-### P2-8 体积口径分裂
-解包 356MB vs D6「<220–250MB」（安装器口径 50MB 则达标）。建议：README/ARCHITECTURE 明确「安装器 ≤250MB」口径并回填实测值（50MB 安装器/356MB 解包/29,488 文件）；按 ARCHITECTURE §5.3 裁剪内核（去 dev/平台切片）压 footprint 留作 D6 后续决策。
-
-### P2-9 ✅已缓解（c914b07）文档过度声明
-README 已改为「更新机制=设计定稿/实现待办」；其余 ARCHITECTURE §8「✅定稿」列仍建议增加「实现状态」列。
-
-### P2-10 ❌ 构建指引缺失
-README 仅写 `cargo run`；MSVC 双坑（link 劫持/LNK1181）无说明。修复：README 补 vcvars64 或 .cargo/config.toml 固化 linker。
-
-### P3-11 崩溃计数语义
-任何内核退出（含未来优雅退出 path）计「崩溃」；建议 exit code 0 不计入。
-
-### P3-12 updater 单元测试覆盖率
-仅 2 测（integrity 解析/无网络安全返回）；建议为 extract/swap/rollback 加临时目录单测，并把 §2.8 dry-run 固化为集成测试（mock registry）。
-
-## 4. 通过项（保留证据）
-1. 内核 spawn/就绪/端口契约与实测一致（动态端口、防保留段冲突）。
-2. /quit 优雅停止 + Job Object 兜底；退出无残留（验收指标达成）。
-3. 单实例：第二实例快速退出 + 聚焦回调。
-4. 限次崩溃重启（≤2 + 退避），超限收敛错误对话框。
-5. 壳静态体积极小（exe 7.9MB / WS 27MB），无 Chromium。
-6. DSH_HOME 与内核解耦，隔离运行验证通过（更新/隔离模式下数据零迁移的前提成立）。
-7. 单元测试通过；测试逻辑与真实输出一致。
-8. 全捆绑安装包（28d3e67）装机可用：布局正确、安装态 smoke 通过、安装/卸载干净（本评审两轮实测）。
-
-## 5. 验收判定汇总
-- ① 跟随官方更新：**❌ 不可用**（updater 初稿 dry-run 必败 + 未接线，P0-2）
-- ② 性能：**✅ 达标**（壳层数字健康；体积口径待文档化）
-- ③ 非纯 web 套皮：**✅ 达标**
-- ④ 安装包可安装：**✅ 达标**（28d3e67 全捆绑版已验证；需 CI 门禁固化）
-- ⑤ 双击启动无需 shell：**✅ 达标**
-
-**结论：M1/M2/M4-打包 已达成可交付质量（P0-1 已修），M3（托盘）与 M4-更新 未完成——按用户五条要求，当前仅剩「跟随官方更新」未达成；建议：updater 按 P0-2 修复方向重设计（全量捆绑更新源），完成接线+托盘触发后做第二轮验收。**
+**下一步建议**：①engineer 完成 P0-A+P1-3 → 重打包 → 复验（安装+smoke+退出码）；②修 P0-13（1 行复位 + 1 条回归测试）；③mock registry 或等官方新版做端到端更新验收；④README 里程碑/体积数字同步（P2-8/P2-E）。

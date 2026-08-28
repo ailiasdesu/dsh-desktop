@@ -1,7 +1,9 @@
-//! M4 版本跟随与回滚（ARCHITECTURE.md §5/§6）
-//! 流程：检查(Registry dist-tags) → 下载 tgz(sha512 integrity 校验) → 解压 kernel.new →
-//!       --help 冒烟(隔离 DSH_HOME) → (内核停止后) rename 原子替换 → 重启；
-//!       失败/崩溃循环 → kernel.old 回滚。安装包捆绑 ≠ 更新机制变化。
+//! M4 版本跟随与回滚（ARCHITECTURE.md §5/§6 + captain 裁定 2026-08-29）
+//! 裁定要点：更新单位 = 完整自足树（package.json + node_modules 全套，npm install 产物）。
+//! 官方 npm tgz(33KB) 只含 lib/config/package.json；dsh-* 家族子包 co-release ^0.1.1-rc.2，
+//! 仅替换主包永远不满足 → 准备阶段必须用捆绑 npm 对 tgz 重放安装：
+//!   node <runtime>/npm/bin/npm-cli.js install --prefix <kernel.new> --omit=dev --no-audit --no-fund <tgz>
+//!   产物 = 与 kernel/ 同构完整树（npm 按官方版本解析全部依赖）。
 use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha512};
@@ -37,7 +39,7 @@ fn fetch_registry() -> Option<Value> {
     serde_json::from_slice(&out.stdout).ok()
 }
 
-/// 检查更新：None=已是最新（或网络失败）；Some(info)=可更新
+/// 检查更新：None=已是最新（或网络失败）；Some(info)=可更新（容忍 -rc.x，dist-tag 直比）
 pub fn check_latest(kernel_root: &Path) -> Option<UpdateInfo> {
     let cur = current_version(kernel_root)?;
     let reg = fetch_registry()?;
@@ -49,7 +51,6 @@ pub fn check_latest(kernel_root: &Path) -> Option<UpdateInfo> {
     if latest == cur {
         return None;
     }
-    // 容忍 -rc.x：dist-tag 直出版本，字符串不一致即视为有新版本（ARCHITECTURE §5.1）
     let v = reg.get("versions")?.get(&latest)?;
     let tarball = v.get("dist")?.get("tarball")?.as_str()?.to_string();
     let integrity = v.get("dist")?.get("integrity")?.as_str()?.to_string();
@@ -85,59 +86,83 @@ pub fn verify_tarball(path: &Path, integrity: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// 解压 tgz → <install>/.update_work/package → 平铺为 <install>/kernel.new
-pub fn extract_tarball(tgz: &Path, kernel_new: &Path) -> std::io::Result<()> {
-    let install = kernel_new.parent().unwrap_or(Path::new("."));
-    let work = install.join(".update_work");
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work)?;
-    let file = std::fs::File::open(tgz)?;
-    let giz = flate2::read::GzDecoder::new(file);
-    let mut ar = tar::Archive::new(giz);
-    ar.unpack(&work)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
-
-    let pkg = work.join("package");
-    if !pkg.join("lib").join("bin.js").exists() {
-        return Err(std::io::Error::other("tarball package/lib/bin.js missing"));
-    }
-    let _ = std::fs::remove_dir_all(kernel_new);
-    std::fs::rename(&pkg, kernel_new)?;
-    let _ = std::fs::remove_dir_all(&work);
-    Ok(())
-}
-
-/// 物化依赖树：npm tgz 只含 lib/config/package.json（约 33KB），可运行完整树 = 包 + node_modules
-/// （npm install 产物，含 dsh-* 家族 co-release 子包与 win32-x64 prebuild，约 250MB）。
-/// 优先使用捆绑 runtime/npm-cli.js（node <runtime>/npm-cli.js install）；无则 cmd /C npm。
-pub fn materialize_dependencies(kernel_new: &Path, node: &Path) -> std::io::Result<()> {
-    let npm_cli = node.parent().map(|p| p.join("npm-cli.js"));
-    let mut cmd = if let Some(cli) = npm_cli {
-        if cli.exists() {
-            let mut c = Command::new(node);
-            c.arg(&cli);
-            c
-        } else {
-            let mut c = Command::new("cmd");
-            c.arg("/C").arg("npm");
-            c
-        }
-    } else {
+/// 重放安装（裁定核心）：node <runtime>/npm/bin/npm-cli.js install --prefix <kernel.new> <tgz>
+/// 优先捆绑 npm；缺失时 cmd /C npm 兜底。
+/// 实测（npm 11）：空目录 --prefix install <tgz> → npm 将 tgz 作为根工程安装：
+/// kernel.new/{package.json,lib,config,…} + kernel.new/node_modules（完整依赖树）= 与 kernel/ 同构，
+/// 无需平铺。兜底：若主包落在 node_modules/@deepseek-ai/dsh/ 则执行平铺逻辑。
+pub fn materialize_dependencies(
+    kernel_new: &Path,
+    node: &Path,
+    tgz: &Path,
+) -> std::io::Result<()> {
+    // 捆绑 npm 布局（官方 node 发行规范）：<runtime>/node_modules/npm/bin/npm-cli.js
+    let npm_cli = node
+        .parent()
+        .map(|p| p.join("node_modules").join("npm").join("bin").join("npm-cli.js"));
+    let has_bundled_npm = npm_cli.as_ref().map(|c| c.exists()).unwrap_or(false);
+    let mut cmd = if has_bundled_npm {
+        let mut c = Command::new(node);
+        c.arg(npm_cli.unwrap());
+        c
+    } else if cfg!(debug_assertions) {
+        // 仅 debug 构建允许回退系统 npm（开发机便利）；release 必须自包含（P0 裁定）
         let mut c = Command::new("cmd");
         c.arg("/C").arg("npm");
         c
+    } else {
+        return Err(std::io::Error::other(
+            "内核依赖物化程序缺失：runtime/node_modules/npm 未随包安装（更新不可用）",
+        ));
     };
     cmd.arg("install")
+        .arg("--prefix")
+        .arg(kernel_new)
         .args(["--omit=dev", "--no-audit", "--no-fund"])
-        .current_dir(kernel_new);
+        .arg(tgz);
     match cmd.output() {
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => Err(std::io::Error::other(format!(
-            "npm install failed: {}",
-            String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("")
-        ))),
-        Err(e) => Err(e),
+        Ok(o) if o.status.success() => {}
+        Ok(o) => {
+            return Err(std::io::Error::other(format!(
+                "npm install failed: {}",
+                String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("")
+            )));
+        }
+        Err(e) => return Err(e),
     }
+
+    // 布局归一：根布局（npm 空目录语义）或平铺兜底
+    if kernel_new.join("lib").join("bin.js").exists() {
+        return Ok(()); // 根布局：与 kernel/ 同构
+    }
+    let pkg = kernel_new
+        .join("node_modules")
+        .join("@deepseek-ai")
+        .join("dsh");
+    if !pkg.join("lib").join("bin.js").exists() {
+        return Err(std::io::Error::other(
+            "installed package missing lib/bin.js (root layout and flatten fallback both failed)",
+        ));
+    }
+    for entry in std::fs::read_dir(&pkg)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy().to_string();
+        if name_str == "node_modules" || name_str == ".package-lock.json" {
+            continue;
+        }
+        let dst = kernel_new.join(&name);
+        if dst.exists() {
+            if dst.is_dir() {
+                let _ = std::fs::remove_dir_all(&dst);
+            } else {
+                let _ = std::fs::remove_file(&dst);
+            }
+        }
+        std::fs::rename(entry.path(), &dst)?;
+    }
+    let _ = std::fs::remove_dir_all(&pkg);
+    Ok(())
 }
 
 /// 冒烟：node <new>/lib/bin.js web --help（隔离 DSH_HOME），退出码 0 = 通过
@@ -210,7 +235,7 @@ pub fn rollback(kernel_root: &Path, keep_bad: bool) -> std::io::Result<()> {
     Ok(())
 }
 
-/// 完整准备阶段（不停机）：下载 → 校验 → 解压 kernel.new → 冒烟
+/// 完整准备阶段（不停机）：下载 → sha512 校验 → 捆绑 npm 重放安装（完整树）→ 平铺 → 冒烟
 pub fn prepare_new_kernel(
     info: &UpdateInfo,
     node: &Path,
@@ -236,17 +261,15 @@ pub fn prepare_new_kernel(
     verify_tarball(&tgz, &info.integrity)?;
 
     let kernel_new = install.join("kernel.new");
-    extract_tarball(&tgz, &kernel_new)?;
+    let _ = std::fs::remove_dir_all(&kernel_new);
+    materialize_dependencies(&kernel_new, node, &tgz)?;
     let _ = std::fs::remove_file(&tgz);
-
-    // ⚠ npm 包 tgz 不含 node_modules：必须先物化依赖树（~250MB，联网 npm install）
-    materialize_dependencies(&kernel_new, node)?;
 
     smoke_kernel(node, &kernel_new)?;
     Ok(kernel_new)
 }
 
-/// 更新流程入口：检查 → 用户确认 → 准备（下载/校验/解压/冒烟）→ 返回 (结果文案, 已准备的新内核)
+/// 更新流程入口：检查 → 用户确认 → 准备（下载/校验/重放安装/平铺/冒烟）→ 返回 (结果文案, 新内核)
 pub fn run_update_flow(
     kernel_root: &Path,
     node: &Path,
