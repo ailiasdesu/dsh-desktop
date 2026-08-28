@@ -52,6 +52,33 @@ struct Resolved {
 
 /// 内核 lib/bin.js 定位优先级（契约 §2.2/开发兜底）：
 /// settings.kernelPath → 捆绑 kernel/ → DSH_DESKTOP_KERNEL → %APPDATA%/npm/node_modules → npm root -g
+/// 内核包根（<root>/lib/bin.js 的 <root>）——kernel.rs 与 updater.rs 共用
+pub fn resolve_kernel_root(settings: &AppSettings, exe_dir: &Path) -> std::io::Result<PathBuf> {
+    let bin = find_kernel_bin(settings, exe_dir)?;
+    Ok(kernel_root_of(&bin))
+}
+
+pub fn kernel_root_of(bin: &Path) -> PathBuf {
+    bin.parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default()
+}
+
+/// node 解析（与 resolve_paths 相同规则），供 updater 冒烟使用
+pub fn resolve_node_path(settings: &AppSettings, exe_dir: &Path) -> PathBuf {
+    if !settings.node_path.is_empty() {
+        PathBuf::from(&settings.node_path)
+    } else {
+        let bundled = repo_root(exe_dir).join("runtime").join("node.exe");
+        if bundled.exists() {
+            bundled
+        } else {
+            PathBuf::from("node")
+        }
+    }
+}
+
 fn find_kernel_bin(settings: &AppSettings, exe_dir: &Path) -> std::io::Result<PathBuf> {
     if !settings.kernel_path.is_empty() {
         return Ok(PathBuf::from(&settings.kernel_path).join("lib").join("bin.js"));
@@ -108,16 +135,7 @@ fn resolve_paths(
     exe_dir: &Path,
     data_dir: &Path,
 ) -> std::io::Result<Resolved> {
-    let node = if !settings.node_path.is_empty() {
-        PathBuf::from(&settings.node_path)
-    } else {
-        let bundled = repo_root(exe_dir).join("runtime").join("node.exe");
-        if bundled.exists() {
-            bundled
-        } else {
-            PathBuf::from("node") // 开发模式：PATH 中的 node
-        }
-    };
+    let node = resolve_node_path(settings, exe_dir);
 
     let bin = find_kernel_bin(settings, exe_dir)?;
     let patch = data_dir.join("desktop.patch.yml");
@@ -250,6 +268,30 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
         }
         match launch_once(&app, &ctl, &res, &settings, smoke) {
             LaunchOutcome::Stopped => break,
+            LaunchOutcome::Restart => {
+                // 更新流：内核已停止，此刻执行原子替换（§5.2 步骤④）
+                let pending = ctl.update_path.lock().unwrap().take();
+                if let Some(_kernel_new) = pending {
+                    let root = kernel_root_of(&res.bin);
+                    let newver = ctl.updated_version.lock().unwrap().clone().unwrap_or_default();
+                    match crate::updater::apply_swap(&root, &newver) {
+                        Ok(()) => {
+                            eprintln!("[kernel] updated to {newver}, relaunching");
+                        }
+                        Err(e) => {
+                            eprintln!("[kernel] apply_swap failed: {e}");
+                            let _ = crate::updater::rollback(&root, false);
+                            if !smoke {
+                                crate::jobobject::show_error(
+                                    "DSH Desktop - 更新失败",
+                                    &format!("内核替换失败，已回滚：{e}"),
+                                );
+                            }
+                        }
+                    }
+                }
+                continue; // 重新 spawn（新版本文件）
+            }
             LaunchOutcome::Exited => {
                 // 记录崩溃并判限次（600s 滑动窗口）
                 let crash_count = {
@@ -261,6 +303,24 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
                 };
                 if ctl.stop.load(Ordering::SeqCst) {
                     break;
+                }
+                // 更新后崩溃循环自动回滚（§6.2：新版本 10 分钟内 ≥2 次）
+                let upd_ver = ctl.updated_version.lock().unwrap().clone();
+                if let Some(uv) = upd_ver {
+                    let root = kernel_root_of(&res.bin);
+                    let cur = crate::updater::current_version(&root).unwrap_or_default();
+                    if cur == uv && crash_count >= 2 {
+                        let _ = crate::updater::rollback(&root, false);
+                        *ctl.updated_version.lock().unwrap() = None;
+                        eprintln!("[kernel] auto-rollback from {uv}");
+                        if !smoke {
+                            crate::jobobject::show_error(
+                                "DSH Desktop - 已自动回滚",
+                                &format!("新版本 {uv} 启动后连续崩溃，已自动回滚到上一版本。"),
+                            );
+                        }
+                        continue;
+                    }
                 }
                 if crash_count <= MAX_AUTO_RESTART {
                     let idx = (crash_count - 1).min(BACKOFF.len() - 1);
@@ -288,6 +348,7 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
 enum LaunchOutcome {
     Exited,
     Stopped,
+    Restart,
 }
 
 fn launch_once(
@@ -403,11 +464,16 @@ fn launch_once(
     let url = format!("http://127.0.0.1:{port}/");
     show_or_redirect(app, &url);
 
-    // 阶段 2：运行中监测（停止请求 + 崩溃检测）
+    // 阶段 2：运行中监测（停止请求 / 更新重启请求 / 崩溃检测）
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
             graceful_stop(&mut child, job.as_ref(), Some(port));
             return LaunchOutcome::Stopped;
+        }
+        if ctl.restart.load(Ordering::SeqCst) {
+            eprintln!("[kernel] update restart requested");
+            graceful_stop(&mut child, job.as_ref(), Some(port));
+            return LaunchOutcome::Restart;
         }
         match child.try_wait() {
             Ok(Some(_st)) => {

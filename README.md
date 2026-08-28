@@ -14,7 +14,7 @@ DSH (DeepSeek Harness) 桌面版：Tauri 2.x (Rust) 原生 Windows 壳，属主�
 ## 安装包（D6 方案 B 全捆绑 · 用户拍板 2026-08-29）
 
 `npx tauri build` 产出 NSIS 安装包，**直接包含**：Tauri 壳 + 捆绑 `runtime/node.exe`（v24.16.0）+ 官方内核 `kernel/`（npm 全局闭包，~250MB 未裁剪）+ `desktop/` patch 插件 + WebView2 embedBootstrapper（离线可装）。
-即装即用、离线完整。**安装包捆绑 ≠ 更新机制变化**：运行时版本跟随（Registry→tgz(integrity)→kernel.new→冒烟→原子替换→重启/回滚 kernel.old，DSH_HOME 零迁移）**设计已定稿（ARCHITECTURE.md §5-§6）但实现（updater.rs）尚未开工——M4 待办**，当前版本不检查更新。
+即装即用、离线完整。**安装包捆绑 ≠ 更新机制变化**：运行时版本跟随已实现（updater.rs，M4）——Registry→tgz(sha512 integrity)→解压→**npm install 物化依赖树**（tgz 仅 33KB 骨架）→`--help` 冒烟→内核停止后 rename 原子替换 kernel↔kernel.old→重启；失败/新版本 10min 崩溃≥2 次自动回滚（kernel.old）；DSH_HOME 零迁移。托盘右键「检查更新」手动触发（当前 registry latest=0.1.1-rc.2=捆绑版本，无更新可检查）。
 
 > 体积预期：整体安装包约 200-250MB（当前未做平台裁剪；后续可按 ARCHITECTURE §5.3 剪 node-pty/koffi 预编译再降 50-80MB）。
 ## 开发运行
