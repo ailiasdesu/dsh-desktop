@@ -1,0 +1,9 @@
+target/
+node_modules/
+kernel/
+runtime/
+desktop/generated/
+*.log
+*.local
+.idea/
+.vscode/

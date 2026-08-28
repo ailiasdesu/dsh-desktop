@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DSH Desktop",
+  "version": "0.1.0",
+  "identifier": "com.dshdesktop.app",
+  "build": {
+    "beforeDevCommand": null,
+    "beforeBuildCommand": null,
+    "frontendDist": "../web-static"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

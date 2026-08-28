@@ -1,0 +1,500 @@
+//! M2 核心：DSH 内核子进程全生命周期管理（属主模式）
+//! 契约（ARCHITECTURE.md §4/§10）：
+//!  - spawn: <node> <kernel>/lib/bin.js web --patch <patch> --no-open --port <0|fixed>
+//!    （--patch 等 launcher flags 必须最先，否则 unknown option --patch）
+//!  - 就绪: stdout 正则 ^dsh web: http://127.0.0.1:(\d+)
+//!  - 停止: GET /quit（patch 挂载，Windows 唯一优雅路径）→ ≤8s → JobObject 树级硬杀
+//!  - 崩溃: 相同版本连续崩溃 ≤2 次自动重启（退避 1s/5s），超限 → 错误对话框
+use crate::http;
+use crate::jobobject::JobObject;
+use crate::settings::AppSettings;
+use crate::KernelCtl;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+use tauri::Manager;
+
+const MAX_AUTO_RESTART: usize = 2; // 同一版本连续崩溃上限（600s 窗口）
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
+const QUIT_WAIT: Duration = Duration::from_secs(8);
+const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(5)];
+const FIXED_PORT_PREFIX: &str = "fixed:";
+
+pub enum KernelEvent {
+    Ready(u16),
+    Line(String),
+}
+
+/// 就绪行契约：dsh web: http://127.0.0.1:<port>
+pub fn parse_port_from_line(line: &str) -> Option<u16> {
+    if !line.contains("dsh web: http://127.0.0.1:") {
+        return None;
+    }
+    let rest = line.trim_start_matches("dsh web: http://127.0.0.1:");
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
+#[derive(Debug)]
+struct Resolved {
+    node: PathBuf,
+    bin: PathBuf,
+    patch: PathBuf,
+    log: PathBuf,
+}
+
+/// 内核 lib/bin.js 定位优先级（契约 §2.2/开发兜底）：
+/// settings.kernelPath → 捆绑 kernel/ → DSH_DESKTOP_KERNEL → %APPDATA%/npm/node_modules → npm root -g
+fn find_kernel_bin(settings: &AppSettings, exe_dir: &Path) -> std::io::Result<PathBuf> {
+    if !settings.kernel_path.is_empty() {
+        return Ok(PathBuf::from(&settings.kernel_path).join("lib").join("bin.js"));
+    }
+    let bundled = repo_root(exe_dir).join("kernel").join("lib").join("bin.js");
+    if bundled.exists() {
+        return Ok(bundled);
+    }
+    if let Ok(p) = std::env::var("DSH_DESKTOP_KERNEL") {
+        let cand = PathBuf::from(p).join("lib").join("bin.js");
+        if cand.exists() {
+            return Ok(cand);
+        }
+        return Err(std::io::Error::other(
+            "DSH_DESKTOP_KERNEL set but lib/bin.js missing",
+        ));
+    }
+    let mut found: Option<PathBuf> = None;
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let cand = PathBuf::from(appdata)
+            .join("npm")
+            .join("node_modules")
+            .join("@deepseek-ai")
+            .join("dsh")
+            .join("lib")
+            .join("bin.js");
+        if cand.exists() {
+            found = Some(cand);
+        }
+    }
+    if found.is_none() {
+        // npm.cmd 不能直接 CreateProcess，走 cmd /C（Windows）
+        if let Ok(out) = Command::new("cmd").arg("/C").arg("npm root -g").output() {
+            let g = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !g.is_empty() {
+                let cand =
+                    PathBuf::from(g).join("@deepseek-ai").join("dsh").join("lib").join("bin.js");
+                if cand.exists() {
+                    found = Some(cand);
+                }
+            }
+        }
+    }
+    match found {
+        Some(c) => Ok(c),
+        None => Err(std::io::Error::other(
+            "kernel not found (bundled kernel/, DSH_DESKTOP_KERNEL, %APPDATA%/npm, npm root -g all exhausted)",
+        )),
+    }
+}
+
+fn resolve_paths(
+    settings: &AppSettings,
+    exe_dir: &Path,
+    data_dir: &Path,
+) -> std::io::Result<Resolved> {
+    let node = if !settings.node_path.is_empty() {
+        PathBuf::from(&settings.node_path)
+    } else {
+        let bundled = repo_root(exe_dir).join("runtime").join("node.exe");
+        if bundled.exists() {
+            bundled
+        } else {
+            PathBuf::from("node") // 开发模式：PATH 中的 node
+        }
+    };
+
+    let bin = find_kernel_bin(settings, exe_dir)?;
+    let patch = data_dir.join("desktop.patch.yml");
+    let log = data_dir.join("logs").join("kernel.log");
+
+    Ok(Resolved {
+        node,
+        bin,
+        patch,
+        log,
+    })
+}
+
+/// 工程根推断：安装布局=<exe>（kernel/ desktop/ 相邻）；开发布局=<exe>/../../../（src-tauri/target/{debug,release}）
+fn repo_root(exe_dir: &Path) -> PathBuf {
+    for cand in [
+        exe_dir.join("..").join("..").join(".."),
+        exe_dir.join("..").join(".."),
+    ] {
+        if cand.join("desktop").join("quit.js").exists() {
+            return cand.to_path_buf();
+        }
+    }
+    PathBuf::from(exe_dir)
+}
+
+fn file_url(p: &Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    format!("file:///{s}")
+}
+
+fn write_patch(
+    patch_path: &Path,
+    quit_js: &Path,
+    health_js: &Path,
+) -> std::io::Result<()> {
+    let lines = vec![
+        "# generated by dsh-desktop shell (do not edit)".to_string(),
+        "- insert:".to_string(),
+        "  - id: desktop-quit".to_string(),
+        format!("    name: '{}'", file_url(quit_js)),
+        "- insert:".to_string(),
+        "  - id: desktop-health".to_string(),
+        format!("    name: '{}'", file_url(health_js)),
+    ];
+    if let Some(parent) = patch_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(patch_path, lines.join("\n"))
+}
+
+fn spawn_kernel(
+    res: &Resolved,
+    settings: &AppSettings,
+    port_arg: String,
+) -> std::io::Result<Child> {
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let mut cmd = Command::new(&res.node);
+    cmd.arg(&res.bin) // <kernel>/lib/bin.js
+        .arg("web") // = --profile web
+        .arg("--patch")
+        .arg(&res.patch) // ⚠ launcher flags 必须先于应用 flags（契约 §10.1）
+        .arg("--no-open")
+        .arg("--port")
+        .arg(&port_arg)
+        .stdout(Stdio::piped());
+
+    if let Some(parent) = res.log.parent() {
+        let _ = std::fs::create_dir_all(parent);
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&res.log)?;
+        cmd.stderr(Stdio::from(f));
+    } else {
+        cmd.stderr(Stdio::null());
+    }
+
+    // 环境：DSH_HOME 空=默认 ~/.dsh（D4 共享）；遥测默认关（决策）
+    if !settings.dsh_home.is_empty() {
+        cmd.env("DSH_HOME", &settings.dsh_home);
+    }
+    if settings.telemetry_disabled {
+        cmd.env("DSH_TELEMETRY_DISABLED", "1");
+    }
+
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW); // 无控制台（§3.2）
+
+    cmd.spawn()
+}
+
+/// 启动 → 就绪 → 窗口 → 崩溃重启 → 停止（阻塞至退出）
+pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &Path) {
+    let exe_dir = std::env::current_exe()
+        .map(|p| p.parent().map(|d| d.to_path_buf()).unwrap_or_default())
+        .unwrap_or_default();
+    let settings = AppSettings::load(data_dir);
+    let _ = settings.save(data_dir);
+
+    let res = match resolve_paths(&settings, &exe_dir, data_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[kernel] resolve failed: {e}");
+            if !smoke {
+                crate::jobobject::show_error(
+                    "DSH Desktop - 内核未找到",
+                    &format!(
+                        "无法定位 DSH 内核（lib/bin.js）：\n{e}\n\n请在 settings.json 指定 kernelPath，或安装官方内核后重试。"
+                    ),
+                );
+            }
+            return;
+        }
+    };
+
+    let root = repo_root(&exe_dir);
+    let quit_js = root.join("desktop").join("quit.js");
+    let health_js = root.join("desktop").join("health.js");
+    if let Err(e) = write_patch(&res.patch, &quit_js, &health_js) {
+        eprintln!("[kernel] write_patch failed: {e}");
+    }
+
+    loop {
+        if ctl.stop.load(Ordering::SeqCst) {
+            break;
+        }
+        match launch_once(&app, &ctl, &res, &settings, smoke) {
+            LaunchOutcome::Stopped => break,
+            LaunchOutcome::Exited => {
+                // 记录崩溃并判限次（600s 滑动窗口）
+                let crash_count = {
+                    let mut v = ctl.crashes.lock().unwrap();
+                    let now = Instant::now();
+                    v.push(now);
+                    v.retain(|t| t.elapsed() < Duration::from_secs(600));
+                    v.len()
+                };
+                if ctl.stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                if crash_count <= MAX_AUTO_RESTART {
+                    let idx = (crash_count - 1).min(BACKOFF.len() - 1);
+                    eprintln!(
+                        "[kernel] exited ({crash_count}/{}), auto-restart in {:?}",
+                        MAX_AUTO_RESTART, BACKOFF[idx]
+                    );
+                    std::thread::sleep(BACKOFF[idx]);
+                    continue;
+                }
+                eprintln!("[kernel] crashed too many times, giving up");
+                if !smoke {
+                    crate::jobobject::show_error(
+                        "DSH Desktop - 内核反复崩溃",
+                        "DSH 内核短时间内连续崩溃，已停止自动重启。\n请检查更新或查看日志后重试。",
+                    );
+                }
+                break;
+            }
+        }
+    }
+    eprintln!("[kernel] shell loop exit");
+}
+
+enum LaunchOutcome {
+    Exited,
+    Stopped,
+}
+
+fn launch_once(
+    app: &tauri::AppHandle,
+    ctl: &KernelCtl,
+    res: &Resolved,
+    settings: &AppSettings,
+    smoke: bool,
+) -> LaunchOutcome {
+    // 端口策略（D2）：fixed:<p> 预检绑定，失败回退 0
+    let port_arg = if let Some(fixed) = settings.port_mode.strip_prefix(FIXED_PORT_PREFIX) {
+        match fixed.parse::<u16>() {
+            Ok(p) => match std::net::TcpListener::bind(("127.0.0.1", p)) {
+                Ok(_) => p.to_string(),
+                Err(_) => "0".to_string(),
+            },
+            Err(_) => "0".to_string(),
+        }
+    } else {
+        "0".to_string()
+    };
+
+    let mut child = match spawn_kernel(res, settings, port_arg) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[kernel] spawn failed: {e}");
+            if !smoke {
+                crate::jobobject::show_error(
+                    "DSH Desktop - 内核启动失败",
+                    &format!("{e}\n\n请检查 node/kernel 路径配置（settings.json）。"),
+                );
+            }
+            return LaunchOutcome::Stopped;
+        }
+    };
+
+    // Job Object：KILL_ON_JOB_CLOSE（防孤儿，§3.2）
+    #[cfg(windows)]
+    let job = match JobObject::new().and_then(|j| j.assign_child(&child).map(|_| j)) {
+        Ok(j) => Some(j),
+        Err(e) => {
+            eprintln!("[kernel] job object assign failed: {e}");
+            None
+        }
+    };
+
+    // 就绪监听：stdout 行 → Ready(port)/Line(text)
+    let stdout = child.stdout.take();
+    let (tx, rx) = mpsc::channel::<KernelEvent>();
+    if let Some(out) = stdout {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(out);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => {
+                        let _ = tx.send(KernelEvent::Line(l.clone()));
+                        if let Some(p) = parse_port_from_line(&l) {
+                            let _ = tx.send(KernelEvent::Ready(p));
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // 阶段 1：等就绪（≤30s，期间响应停止请求/早退）
+    let deadline = Instant::now() + READY_TIMEOUT;
+    let mut port: Option<u16> = None;
+    loop {
+        if ctl.stop.load(Ordering::SeqCst) {
+            graceful_stop(&mut child, job.as_ref(), None);
+            return LaunchOutcome::Stopped;
+        }
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(KernelEvent::Ready(p)) => {
+                port = Some(p);
+                break;
+            }
+            Ok(KernelEvent::Line(l)) => eprintln!("[kernel] {l}"),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if Instant::now() >= deadline {
+                    eprintln!("[kernel] ready timeout(30s)");
+                    graceful_stop(&mut child, job.as_ref(), None);
+                    return LaunchOutcome::Exited;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        if child.try_wait().ok().flatten().is_some() {
+            eprintln!("[kernel] exited before ready");
+            return LaunchOutcome::Exited;
+        }
+    }
+    let port = match port {
+        Some(p) => p,
+        None => return LaunchOutcome::Exited,
+    };
+    *ctl.port.lock().unwrap() = Some(port);
+    eprintln!("[kernel] ready on port {port}");
+
+    if smoke {
+        // 冒烟模式：就绪 → 校验 /health → /quit → 打印 SMOKE_OK → 正常退出
+        std::thread::sleep(Duration::from_millis(500));
+        let health = http::http_get("/health", port, Duration::from_secs(2)).unwrap_or_default();
+        println!("SMOKE health={} port={port}", http::is_ok(&health));
+        graceful_stop(&mut child, job.as_ref(), Some(port));
+        println!("SMOKE_OK port={port}");
+        return LaunchOutcome::Stopped;
+    }
+
+    // 创建/导航窗口（主线程调度）
+    let url = format!("http://127.0.0.1:{port}/");
+    show_or_redirect(app, &url);
+
+    // 阶段 2：运行中监测（停止请求 + 崩溃检测）
+    loop {
+        if ctl.stop.load(Ordering::SeqCst) {
+            graceful_stop(&mut child, job.as_ref(), Some(port));
+            return LaunchOutcome::Stopped;
+        }
+        match child.try_wait() {
+            Ok(Some(_st)) => {
+                eprintln!("[kernel] exited while running");
+                return LaunchOutcome::Exited;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
+            Err(e) => {
+                eprintln!("[kernel] wait error: {e}");
+                return LaunchOutcome::Exited;
+            }
+        }
+    }
+}
+
+/// /quit → ≤8s 等待 → JobObject 树级硬杀（§4.3）
+fn graceful_stop(child: &mut Child, job: Option<&JobObject>, port: Option<u16>) {
+    if let Some(p) = port {
+        let _ = http::http_get("/quit", p, Duration::from_secs(2));
+    }
+    let deadline = Instant::now() + QUIT_WAIT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    eprintln!("[kernel] quit timeout, tree-kill");
+                    if let Some(j) = job {
+                        let _ = j.terminate();
+                    } else {
+                        let _ = child.kill();
+                    }
+                    while child.try_wait().ok().flatten().is_none() {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+fn show_or_redirect(app: &tauri::AppHandle, url: &str) {
+    use tauri::WebviewUrl;
+    let app2 = app.clone();
+    let u = url.to_string();
+    let (tx, rx) = mpsc::channel::<bool>();
+    let _ = app.run_on_main_thread(move || {
+        let ok = match app2.get_webview_window("main") {
+            Some(w) => {
+                let js = format!(
+                    "window.location.href = {};",
+                    serde_json::to_string(&u).unwrap_or_else(|_| "\"\"".into())
+                );
+                w.eval(&js).is_ok()
+            }
+            None => {
+                tauri::WebviewWindowBuilder::new(
+                    &app2,
+                    "main",
+                    WebviewUrl::External(tauri::Url::parse(&u).unwrap_or_else(|_| {
+                        tauri::Url::parse("http://127.0.0.1/").unwrap()
+                    })),
+                )
+                .title("DSH Desktop")
+                .inner_size(1280.0, 820.0)
+                .build()
+                .is_ok()
+            }
+        };
+        let _ = tx.send(ok);
+    });
+    let _ = rx.recv_timeout(Duration::from_secs(5));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ready_line() {
+        assert_eq!(parse_port_from_line("dsh web: http://127.0.0.1:2085"), Some(2085));
+        assert_eq!(parse_port_from_line("dsh web: http://127.0.0.1:3456 extra"), Some(3456));
+        assert_eq!(parse_port_from_line("nothing here"), None);
+        assert_eq!(parse_port_from_line(""), None);
+        assert_eq!(parse_port_from_line("dsh web: http://127.0.0.1:"), None);
+    }
+}

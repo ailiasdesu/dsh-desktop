@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"主窗口默认能力（壳层 UI 为内核官方前端，无需 tauri IPC；spawn/kill 全在 Rust 侧）","local":true,"windows":["main"],"permissions":["core:default"]}}
