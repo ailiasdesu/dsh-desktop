@@ -486,8 +486,14 @@ fn launch_once(
         // 冒烟模式：就绪 → 校验 /health → /quit → 打印 SMOKE_OK → 正常退出
         std::thread::sleep(Duration::from_millis(500));
         let health = http::http_get("/health", port, Duration::from_secs(2)).unwrap_or_default();
-        println!("SMOKE health={} port={port}", http::is_ok(&health));
+        let health_ok = http::is_ok(&health);
+        println!("SMOKE health={health_ok} port={port}");
         graceful_stop(&mut child, job.as_ref(), Some(port));
+        if !health_ok {
+            // P1-3：health 失败 = 冒烟失败，非零退出
+            println!("SMOKE_FAILED health={health_ok}");
+            return LaunchOutcome::SmokeFail;
+        }
         println!("SMOKE_OK port={port}");
         return LaunchOutcome::Stopped;
     }
@@ -502,7 +508,7 @@ fn launch_once(
             graceful_stop(&mut child, job.as_ref(), Some(port));
             return LaunchOutcome::Stopped;
         }
-        if ctl.restart.load(Ordering::SeqCst) {
+        if ctl.consume_restart() {
             eprintln!("[kernel] update restart requested");
             graceful_stop(&mut child, job.as_ref(), Some(port));
             return LaunchOutcome::Restart;

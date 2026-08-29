@@ -27,6 +27,27 @@ pub struct KernelCtl {
     pub updated_version: Arc<Mutex<Option<String>>>,
 }
 
+impl KernelCtl {
+    /// 消费式读取重启请求（原子复位，P0-13 回归保护）
+    pub fn consume_restart(&self) -> bool {
+        self.restart.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consume_restart_resets() {
+        let ctl = KernelCtl::default();
+        assert!(!ctl.consume_restart(), "初始应为 false");
+        ctl.restart.store(true, Ordering::SeqCst);
+        assert!(ctl.consume_restart(), "请求后应是 true（消费）");
+        assert!(!ctl.consume_restart(), "消费后自动复位为 false（防环路）");
+    }
+}
+
 impl Default for KernelCtl {
     fn default() -> Self {
         Self {
