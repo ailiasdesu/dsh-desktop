@@ -81,3 +81,49 @@ restart 标志无复位点（全工程仅有 store(true)）；导致 apply_swap 
 - ⑤ 双击启动无需 shell：✅ 达标（含 hide-to-tray 语义）。
 
 **下一步建议**：①engineer 完成 P0-A+P1-3 → 重打包 → 复验（安装+smoke+退出码）；②修 P0-13（1 行复位 + 1 条回归测试）；③mock registry 或等官方新版做端到端更新验收；④README 里程碑/体积数字同步（P2-8/P2-E）。
+
+---
+
+# v0.2 复核（t13 · 终审）
+
+- 基线：HEAD = **c3630af（终）+ 195369b（F 内存看门狗）+ 840106d（破坏性更新保护/性能/降级）+ c32483b（并发守卫/数据独立/自启深链）+ b56df65（虎鲸图标）+ fe4eb30（P0-13/P0-A/P1-3 修复）**；195369b 与 c3630af 于评审窗口内落地（F 看门狗与 loading 失败路径修复——后者即本报告 P2-18 的上游修复）；本报告验证基线=上述全量 HEAD（初始构建与装机验证在 840106d+F 树上完成，最后以 c3630af 终版重打包复验，见文末补记）。
+- 验证环境：vcvars64（LIB/INCLUDE 正斜杠）；所有运行时测试使用隔离 DSH_HOME（测试发现 shell 环境自带 DSH_HOME 环境变量，并发守卫测试需显式 env -u DSH_HOME 才命中真场景）。
+- 重打包：npx tauri build 成功 → **DSH Desktop_0.2.0_x64-setup.exe = 52,185,310 B（≈49.8 MiB）**；exe 8,354,816 B。
+
+## v0.2 判定表（对照 t13 任务书 §1-§5）
+
+| 验收点 | 判定 | 证据 |
+|---|---|---|
+| §1 并发守卫无误杀/不漏检 | ✅（含一处低危） | 复算 wmic 解析：检测到 npx 宿主+真内核（2 命中）；自身排除=按自身内核路径子串；端到端实测：`env -u DSH_HOME DSH_DESKTOP_GUARD_ANSWER=no` → `[guard] foreign kernel detected, user declined` → EXIT=0、无残留 shell/内核。⚠️P2-17：guard.rs 命中格式化 `&cmd[..117]` 字节切片在中文路径 >120 字符时会 panic（UTF-8 非边界），建议 chars().take() |
+| §1 更新兼容保护（smoke_kernel_with_patch 失败不换版本+清 kernel.new） | ✅（代码级） | prepare_new_kernel：with-patch 冒烟失败 → `remove_dir_all(kernel.new)` + 返回「已保留当前版本」（updater.rs 236-244 行）；冒烟含 就绪30s→/health 200→/quit→≤10s 全契约 |
+| §1 降级路径（无 patch 仅非 smoke；graceful_stop 语义） | ✅ | 崩溃超限（非 smoke）→ degraded_flag=true → 无 patch 重试一次；degraded 警告弹一次（swap 守卫）；graceful_stop 在 degraded 时跳过 /quit 直接树杀；smoke 永不降级（exit_code=2 保持非零语义） |
+| §1 立即窗口失败路径（loading 页错误提示） | ✅（c3630af 已补失败路径） | loading.html 窗口 503ms（dev）/524ms（装机）出现 ✓；`set_loading_status` 经 `w.eval` 注入 #status：崩溃超限/spawn 失败/就绪超时 三路径有提示；残余 P3-27（resolve 失败仅原生对话框） |
+| §1 additional_browser_args 保留默认串 | ✅ | 自定 args 显式含 wry 默认串 `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection` + 防节流 4 项 + 按配置追加 --disable-gpu；wry 默认参数由 Tauri 注入不受影响 |
+| §1 settings 旧文件向后兼容 | ✅ | `#[serde(default)]` + 全字段 Default；实测 8 字段旧 settings.json 启动 `--update-check` 不炸、退出码 0 |
+| §2 cargo test | ✅ 6/6 | memory_warn_hysteresis / guard×2 / updater×2 / parse_ready_line |
+| §2 dev --smoke exit0 | ✅ | SMOKE health=true port=7986 / SMOKE_OK / EXIT=0（含 degraded=false 证据行） |
+| §2 坏路径 exit2 | ✅ | settings.kernel_path=X:/nope + --smoke → `no ready port` → EXIT=2（P1-3 复验：失败非零） |
+| §2 并发守卫实测 | ✅ | 上述 `env -u DSH_HOME` + answer=no → exit0 无残留；真实宿主（npx+内核）均被检出（提示框内容含 pid 列表——代码/测试钩子验证） |
+| §2 托盘全菜单 | ✅（代码级） | show/check/独立数据模式/开机自启/退出 五项菜单；构建成功（setup 失败即 app 退出）；菜单点击无法程序化触发（t10 已实测 data/autostart 往返） |
+| §2 深链 start dsh-desktop:// | ✅ | 运行中 `Start-Process 'dsh-desktop://test/abc'` → 实例数保持 1（第二实例快速退出+聚焦）；协议注册幂等（启动自写 HKCU Classes；卸载不清理=设计，README 记录；本轮测试后已清残留） |
+| §2 自启 reg query | ✅ | `--set-autostart 1` → HKCU Run「DSH Desktop」REG_SZ=exe✓；`--set-autostart 0` → 键消失；往返 OK |
+| §2 独立数据模式切换 | ✅ | `--set-independent 1` → INDEPENDENT_SET=isolation + settings.dsh_home=…/dsh-home + 目录创建；`--set-independent 0` → shared；GUI 切换路径=托盘复选→保存→restart→内核线程每轮重载 settings（代码级）；t10 已实测往返 |
+| §3 重打包+装机 | ✅ | 安装 31,363 文件 / 372MB；runtime/node_modules/npm ✓（P0-A 入包）；安装态 smoke `SMOKE_OK port=6659`（bundled 路径解析）；双击 524ms 出 loading 窗口；内核就绪 → /health ok；关闭→隐藏（托盘）；硬杀无残留；卸载干净（目录+注册表）；**安装包 49.8 MiB（52.2MB）** |
+| §3 图标=黑色虎鲸 | ✅ | read_image 目检：512px 纯黑虎鲸（官方 favicon 源，fill=#000）✓；icon.ico 18.6KB/icon.png 23.7KB（b56df65 全套 50 文件） |
+| §4 dsh-plugin-manager | ✅（含交付 diff 核验） | unit.mjs **54 断言 ALL PASSED**（本机复跑）；走查：结构不认识拒绝编辑、行级文本编辑（其余字节不变）、备份 keep10+原子写、核心 bundle 保护、patch 层只读、origin 围栏、add 绝对路径+lib/index.js 校验；**注册 diff 干跑核验：addBundle(真实 manifest) → JSON 有效、位置=session-manager 之后、dependencies 零改动、纯增 1 行+末项补逗号；未应用**（真实 manifest 不变，junction 已建） |
+| §5 REVIEEW 追加 | ✅ | 本章节 |
+| P0-13 复位 | ✅ | Restart 分支 `restart.store(false)` + launch_once `consume_restart()`（swap 双保险）；更新流不可端到端实测（无新版） |
+
+## v0.2 问题清单（新增）
+
+- **P2-17 并发守卫命中格式化 panic 风险**（中）：`&cmd[..117]` 字节切片；中文路径且命令行 >120 字符即 panic（GUI 无声崩溃）。修复：`chars().take(117)` / char_indices。
+- **P2-18 loading 页无错误提示** → ✅ **已修复（c3630af，评审窗口内上游落地）**：`set_loading_status`（run_on_main_thread + `window.setStatus(...)` 注入 #status），覆盖崩溃超限放弃 / spawn 失败 / 就绪超时 三路径；**残余 P3-27**：resolve 失败（内核未找到）路径仍仅原生对话框、loading 页停留原文案（低）。
+- **P1-5 壳日志无落盘**（保持开放）：GUI 启动时 eprintln 全丢（本轮 dialogs 可见但日志不可查）；JobObject assign 失败仅 eprintln（曾观测到一次 toolbox 环境孤儿 node=11052，已清；真实双击场景 assign 均成功→树级回收有效，但失败无告警）。建议 shell.log + assign 失败显式告警。
+- **P2-16 settings 死字段**（保持开放）：update_channel/keep_old_kernel 仍未接入（check_latest 硬编码 latest；apply_swap 无条件覆盖 kernel.old）。
+- **P3-24 冒烟输出污染**（低）：--smoke 尾部出现 wry `Failed to unregister class Chrome_WidgetWin_0 (1411)` stderr（无窗口 smoke 的 WebView2 环境清理噪音，不影响退出码）。
+- **P3-25 守卫自排除标记（开发布局）**（低）：guard 的 own marker=`<exe_dir>/kernel`，开发布局下实际内核路径为 repo_root/kernel（../..），陈旧内核孤儿会当「外来」提示——语义可接受（确为数据冲突）但建议统一用 resolve_kernel_root。
+- **P3-26 更新流端到端未测**：registry latest==捆绑版（0.1.1-rc.2），with-patch 冒烟/交换/回滚为代码+单测级验证；建议 mock registry 集成测试后等官方新版实测。
+
+## v0.2 结论
+
+**五特性（并发守卫/数据独立/自启深链/更新兼容保护/性能项）+ 插件管理 + 图标全部通过终审（P2-18 已由 c3630af 上游修复，仅剩 P2-17 待修 + P3-27 残余），重打包装机全链路验证通过，安装包 52.2MB（49.8 MiB），五条用户要求维持 ①⚠️（机制全链路已实现，P0-13 已修；端到端待官方新版）②✅ ③✅ ④✅ ⑤✅。** 建议：P2-17/P2-18 列入 v0.2.1 前修；mock registry 集成测试作为 t14 候选。
