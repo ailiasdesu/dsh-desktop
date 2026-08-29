@@ -22,6 +22,12 @@ pub struct AppSettings {
     pub node_path: String,
     /// 内核包路径（lib/bin.js 所在包的根）；空=捆绑 kernel/ 或 npm 全局
     pub kernel_path: String,
+    /// 硬件加速（E：false 时 WebView2 追加 --disable-gpu）
+    pub hardware_acceleration: bool,
+    /// 内核 NODE_OPTIONS（E：默认 4G 堆上限；空=不注入）
+    pub node_options: String,
+    /// 内核子进程优先级提升（E：ABOVE_NORMAL）
+    pub boost_priority: bool,
 }
 
 impl Default for AppSettings {
@@ -35,6 +41,9 @@ impl Default for AppSettings {
             keep_old_kernel: true,
             node_path: String::new(),
             kernel_path: String::new(),
+            hardware_acceleration: true,
+            node_options: "--max-old-space-size=4096".into(),
+            boost_priority: true,
         }
     }
 }

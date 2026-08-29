@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>DSH Desktop</title>
+<style>
+  html,body{height:100%;margin:0;background:#0b0d10;color:#cfd3da;
+    font-family:"Segoe UI","Microsoft YaHei",sans-serif;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;}
+  .logo{font-size:30px;font-weight:600;color:#e8ecf3;letter-spacing:1px;}
+  .ring{width:34px;height:34px;border:3px solid #2a2f3a;border-top-color:#3b82f6;border-radius:50%;
+    animation:spin 0.9s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #status{font-size:14px;color:#7d8590;}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="logo">DSH Desktop</div>
+  <div class="ring"></div>
+  <div id="status">正在启动内核…</div>
+</div>
+<script>
+  window.__dshLoading = true;
+  window.setStatus = function(t){ const el=document.getElementById('status'); if(el) el.textContent=t||'正在启动内核…'; };
+</script>
+</body></html>

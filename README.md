@@ -11,6 +11,15 @@ DSH (DeepSeek Harness) 桌面版：Tauri 2.x (Rust) 原生 Windows 壳，属主�
 - M2：内核集成（`src-tauri/src/kernel.rs`）——spawn 就绪契约 / /quit 优雅停止 / Job Object
   防孤儿 / 限次崩溃重启 / 端口策略（默认 --port 0）。
 
+## v0.2 新特性（壳层，零内核改动）
+
+- **并发守卫**：共享 ~/.dsh 时启动先检测另一 DSH 内核（浏览器版 dsh web 在跑即提示；双实例会写坏会话日志 torn JSONL）。
+- **独立数据模式**：托盘→独立数据模式 → 数据转 app_data/dsh-home，与浏览器版不共享；切换立即重启内核。
+- **开机自启 + 深链**：托盘→开机自启（HKCU Run）；dsh-desktop:// 协议启动即幂等注册（卸载不清理该键）。
+- **破坏性更新保护**：新版本必须先通过「带桌面插件全冒烟」（就绪→/health→/quit），不兼容即保持当前版本；启动崩溃超限自动降级（无插件运行并提示，退出强制结束）。
+- **性能**：立即窗口（loading.html 1s 内可见）→ 内核就绪自动进 UI；WebView2 防节流参数；NODE_OPTIONS 默认 4G 堆；内核 ABOVE_NORMAL 优先级。
+- settings.json 新字段（旧文件兼容默认值）：hardware_acceleration / node_options / boost_priority。
+
 ## 安装包（D6 方案 B 全捆绑 · 用户拍板 2026-08-29）
 
 `npx tauri build` 产出 NSIS 安装包，**直接包含**：Tauri 壳 + 捆绑 `runtime/node.exe`（v24.16.0）+ 官方内核 `kernel/`（npm 全局闭包，~250MB 未裁剪）+ `desktop/` patch 插件 + WebView2 embedBootstrapper（离线可装）。

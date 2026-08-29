@@ -327,7 +327,12 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
 | D5 | 更新后旧版本保留 | 保留最近 1 份（回滚友好），可配置删除 | §6.2 |
 | D6 | 安装包体积口径 | **✅ 用户已拍板 2026-08-29：方案 B 全捆绑**——安装包直接含壳+node 运行时+官方内核（~220-250MB），即装即用离线完整；注意：安装包捆绑≠更新机制变化，运行时版本跟随（Registry→tgz→原子替换→重启/回滚）保持不变 | 用户拍板，与任务描述合并为准 |
 | D7 | 代码签名 | 首发无签名（用户体验折中）；正式发布前购 EV 证书 | research-stack §8 R9 |
-| D8 | 深链/开机自启 | 二期（M5）再上；一期仅托盘+单实例 | research-stack §8 R6/M5 |
+| D8 | 深链/开机自启 | **✅ 已在 v0.2 落地（见 D11）** | v0.2 |
+| D9 | 并发守卫（A） | ✅ 已实现：共享默认 ~/.dsh 时启动前检测外部 DSH 内核（wmic 实测列序解析→powershell 兜底，命中 @deepseek-ai\dsh）→ 确认框（双实例会写坏会话日志）；--smoke 跳过；DSH_DESKTOP_GUARD_ANSWER 测试钩子 | v0.2 |
+| D10 | 独立数据模式（B） | ✅ 已实现：托盘 CheckMenuItem 切换 settings.dsh_home=app_data/dsh-home（mkdir）或回共享；切换即重启内核（每轮重载 settings/resolve）；菜单初始态读 settings | v0.2 |
+| D11 | M5 自启+深链（C） | ✅ 已实现：HKCU Run 自启（windows-sys 原生 API，规避 reg.exe 引号解析）+ dsh-desktop:// 协议幂等注册（URL Protocol + shell\open\command）；第二实例深链参数由 single-instance 聚焦（v1 不解析参数）；卸载不清理协议键 | v0.2 |
+| D12 | 破坏性更新保护（D） | ✅ 已实现：prepare 后追加 smoke_kernel_with_patch（临时 home+patch→就绪→/health 200→/quit），不兼容→清理 kernel.new+报错不换版本；运行时降级兜底：崩溃超限→无 patch 尝试一次，成功→degraded 警告+退出跳过 /quit 直接树杀；--smoke 保持非零 | v0.2 |
+| D13 | 性能（E） | ✅ 已实现：setup 即建 loading.html 立即窗口（内核就绪后导航）；WebView2 additional_browser_args 合并防节流（hw=false 追加 --disable-gpu）；NODE_OPTIONS=--max-old-space-size=4096；boost_priority→SetPriorityClass ABOVE_NORMAL | v0.2 |
 
 ---
 

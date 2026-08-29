@@ -16,6 +16,8 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 
 const MAX_AUTO_RESTART: usize = 2; // 同一版本连续崩溃上限（600s 窗口）
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -43,11 +45,11 @@ pub fn parse_port_from_line(line: &str) -> Option<u16> {
 }
 
 #[derive(Debug)]
-struct Resolved {
-    node: PathBuf,
-    bin: PathBuf,
-    patch: PathBuf,
-    log: PathBuf,
+pub struct Resolved {
+    pub node: PathBuf,
+    pub bin: PathBuf,
+    pub patch: PathBuf,
+    pub log: PathBuf,
 }
 
 /// 内核 lib/bin.js 定位优先级（契约 §2.2/开发兜底）：
@@ -150,7 +152,7 @@ fn resolve_paths(
 }
 
 /// 工程根推断：安装布局=<exe>（kernel/ desktop/ 相邻）；开发布局=<exe>/../../../（src-tauri/target/{debug,release}）
-fn repo_root(exe_dir: &Path) -> PathBuf {
+pub fn repo_root(exe_dir: &Path) -> PathBuf {
     for cand in [
         exe_dir.join("..").join("..").join(".."),
         exe_dir.join("..").join(".."),
@@ -167,7 +169,7 @@ fn file_url(p: &Path) -> String {
     format!("file:///{s}")
 }
 
-fn write_patch(
+pub fn write_patch(
     patch_path: &Path,
     quit_js: &Path,
     health_js: &Path,
@@ -187,24 +189,22 @@ fn write_patch(
     std::fs::write(patch_path, lines.join("\n"))
 }
 
-fn spawn_kernel(
+pub fn spawn_kernel(
     res: &Resolved,
     settings: &AppSettings,
     port_arg: String,
+    patch: Option<&std::path::Path>,
 ) -> std::io::Result<Child> {
     #[cfg(windows)]
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let mut cmd = Command::new(&res.node);
-    cmd.arg(&res.bin) // <kernel>/lib/bin.js
-        .arg("web") // = --profile web
-        .arg("--patch")
-        .arg(&res.patch) // ⚠ launcher flags 必须先于应用 flags（契约 §10.1）
-        .arg("--no-open")
-        .arg("--port")
-        .arg(&port_arg)
-        .stdout(Stdio::piped());
+    cmd.arg(&res.bin).arg("web");
+    if let Some(p) = patch {
+        cmd.arg("--patch").arg(p); // ⚠ launcher flags 必须先于应用 flags（契约 §10.1）
+    }
+    cmd.arg("--no-open").arg("--port").arg(&port_arg).stdout(Stdio::piped());
 
     if let Some(parent) = res.log.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -217,18 +217,43 @@ fn spawn_kernel(
         cmd.stderr(Stdio::null());
     }
 
-    // 环境：DSH_HOME 空=默认 ~/.dsh（D4 共享）；遥测默认关（决策）
+    // 环境：DSH_HOME 空=默认 ~/.dsh（D4 共享）；遥测默认关；NODE_OPTIONS（E）
     if !settings.dsh_home.is_empty() {
         cmd.env("DSH_HOME", &settings.dsh_home);
     }
     if settings.telemetry_disabled {
         cmd.env("DSH_TELEMETRY_DISABLED", "1");
     }
+    if !settings.node_options.is_empty() {
+        cmd.env("NODE_OPTIONS", &settings.node_options);
+    }
 
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW); // 无控制台（§3.2）
 
-    cmd.spawn()
+    let degraded_flag = patch.is_none();
+    eprintln!(
+        "[kernel] spawn (degraded={degraded_flag}): {} {} {}",
+        res.node.display(),
+        res.bin.display(),
+        patch.map(|p| format!("--patch {}", p.display())).unwrap_or_else(|| "(no-patch)".into())
+    );
+    let child = cmd.spawn()?;
+
+    // E：子进程优先级提升（ABOVE_NORMAL）
+    if settings.boost_priority {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Threading::{
+                SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS,
+            };
+            let h = child.as_raw_handle();
+            unsafe {
+                let _ = SetPriorityClass(h, ABOVE_NORMAL_PRIORITY_CLASS);
+            }
+        }
+    }
+    Ok(child)
 }
 
 /// 启动 → 就绪 → 窗口 → 崩溃重启 → 停止（阻塞至退出）
@@ -236,42 +261,41 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
     let exe_dir = std::env::current_exe()
         .map(|p| p.parent().map(|d| d.to_path_buf()).unwrap_or_default())
         .unwrap_or_default();
-    let settings = AppSettings::load(data_dir);
-    let _ = settings.save(data_dir);
-
-    let res = match resolve_paths(&settings, &exe_dir, data_dir) {
-        Ok(r) => {
-            // 验收证据：打印实际解析到的 node/内核路径（随包 vs 全局）
-            eprintln!("[kernel] resolved node={} bin={}", r.node.display(), r.bin.display());
-            r
-        }
-        Err(e) => {
-            eprintln!("[kernel] resolve failed: {e}");
-            if !smoke {
-                crate::jobobject::show_error(
-                    "DSH Desktop - 内核未找到",
-                    &format!(
-                        "无法定位 DSH 内核（lib/bin.js）：\n{e}\n\n请在 settings.json 指定 kernelPath，或安装官方内核后重试。"
-                    ),
-                );
-            }
-            return if smoke { 2 } else { 0 };
-        }
-    };
-
-    let root = repo_root(&exe_dir);
-    let quit_js = root.join("desktop").join("quit.js");
-    let health_js = root.join("desktop").join("health.js");
-    if let Err(e) = write_patch(&res.patch, &quit_js, &health_js) {
-        eprintln!("[kernel] write_patch failed: {e}");
-    }
-
     let mut exit_code = 0;
+    let mut degraded_done = false;
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
             break;
         }
-        match launch_once(&app, &ctl, &res, &settings, smoke) {
+        // B：每轮重载 settings/resolve（设置切换 Restart 即生效；更新交换每轮重取内核根）
+        let settings = AppSettings::load(data_dir);
+        let _ = settings.save(data_dir);
+        let res = match resolve_paths(&settings, &exe_dir, data_dir) {
+            Ok(r) => {
+                eprintln!("[kernel] resolved node={} bin={}", r.node.display(), r.bin.display());
+                r
+            }
+            Err(e) => {
+                eprintln!("[kernel] resolve failed: {e}");
+                if !smoke {
+                    crate::jobobject::show_error(
+                        "DSH Desktop - 内核未找到",
+                        &format!(
+                            "无法定位 DSH 内核（lib/bin.js）：\n{e}\n\n请在 settings.json 指定 kernelPath，或安装官方内核后重试。"
+                        ),
+                    );
+                }
+                return if smoke { 2 } else { 0 };
+            }
+        };
+        let root = repo_root(&exe_dir);
+        let quit_js = root.join("desktop").join("quit.js");
+        let health_js = root.join("desktop").join("health.js");
+        if let Err(e) = write_patch(&res.patch, &quit_js, &health_js) {
+            eprintln!("[kernel] write_patch failed: {e}");
+        }
+        let degraded = ctl.degraded.load(Ordering::SeqCst);
+        match launch_once(&app, &ctl, &res, &settings, smoke, degraded) {
             LaunchOutcome::SmokeFail => {
                 exit_code = 2;
                 break;
@@ -352,6 +376,14 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
                 } else {
                     exit_code = 2; // P1-3：冒烟失败必须非零退出
                 }
+                // D：降级兜底——尝试一次无 patch 启动（桌面插件与官方新版不兼容）；smoke 保持非零语义
+                if !smoke && !degraded_done {
+                    degraded_done = true;
+                    ctl.degraded.store(true, Ordering::SeqCst);
+                    eprintln!("[kernel] degraded mode: retry without desktop patch");
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
                 break;
             }
         }
@@ -373,6 +405,7 @@ fn launch_once(
     res: &Resolved,
     settings: &AppSettings,
     smoke: bool,
+    degraded: bool,
 ) -> LaunchOutcome {
     // 端口策略（D2）：fixed:<p> 预检绑定，失败回退 0
     let port_arg = if let Some(fixed) = settings.port_mode.strip_prefix(FIXED_PORT_PREFIX) {
@@ -387,7 +420,7 @@ fn launch_once(
         "0".to_string()
     };
 
-    let mut child = match spawn_kernel(res, settings, port_arg) {
+    let mut child = match spawn_kernel(res, settings, port_arg, (!degraded).then_some(res.patch.as_path())) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[kernel] spawn failed: {e}");
@@ -437,7 +470,7 @@ fn launch_once(
     let mut port: Option<u16> = None;
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
-            graceful_stop(&mut child, job.as_ref(), None);
+            graceful_stop(&mut child, job.as_ref(), None, degraded);
             return LaunchOutcome::Stopped;
         }
         match rx.recv_timeout(Duration::from_millis(200)) {
@@ -449,7 +482,7 @@ fn launch_once(
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if Instant::now() >= deadline {
                     eprintln!("[kernel] ready timeout(30s)");
-                    graceful_stop(&mut child, job.as_ref(), None);
+                    graceful_stop(&mut child, job.as_ref(), None, degraded);
                     return if smoke {
                         LaunchOutcome::SmokeFail
                     } else {
@@ -481,6 +514,12 @@ fn launch_once(
     };
     *ctl.port.lock().unwrap() = Some(port);
     eprintln!("[kernel] ready on port {port}");
+    if degraded && !smoke && !ctl.degraded_warned.swap(true, Ordering::SeqCst) {
+        crate::jobobject::show_error(
+            "DSH Desktop - 已降级运行",
+            "桌面集成插件（quit/health）加载失败，内核已降级启动：\n- 退出将使用强制结束（跳过优雅 /quit）\n- 更新功能不可用\n请检查更新或重新安装修复。",
+        );
+    }
 
     if smoke {
         // 冒烟模式：就绪 → 校验 /health → /quit → 打印 SMOKE_OK → 正常退出
@@ -488,7 +527,7 @@ fn launch_once(
         let health = http::http_get("/health", port, Duration::from_secs(2)).unwrap_or_default();
         let health_ok = http::is_ok(&health);
         println!("SMOKE health={health_ok} port={port}");
-        graceful_stop(&mut child, job.as_ref(), Some(port));
+        graceful_stop(&mut child, job.as_ref(), Some(port), degraded);
         if !health_ok {
             // P1-3：health 失败 = 冒烟失败，非零退出
             println!("SMOKE_FAILED health={health_ok}");
@@ -505,12 +544,12 @@ fn launch_once(
     // 阶段 2：运行中监测（停止请求 / 更新重启请求 / 崩溃检测）
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
-            graceful_stop(&mut child, job.as_ref(), Some(port));
+            graceful_stop(&mut child, job.as_ref(), Some(port), degraded);
             return LaunchOutcome::Stopped;
         }
         if ctl.consume_restart() {
             eprintln!("[kernel] update restart requested");
-            graceful_stop(&mut child, job.as_ref(), Some(port));
+            graceful_stop(&mut child, job.as_ref(), Some(port), degraded);
             return LaunchOutcome::Restart;
         }
         match child.try_wait() {
@@ -528,9 +567,11 @@ fn launch_once(
 }
 
 /// /quit → ≤8s 等待 → JobObject 树级硬杀（§4.3）
-fn graceful_stop(child: &mut Child, job: Option<&JobObject>, port: Option<u16>) {
+fn graceful_stop(child: &mut Child, job: Option<&JobObject>, port: Option<u16>, degraded: bool) {
     if let Some(p) = port {
-        let _ = http::http_get("/quit", p, Duration::from_secs(2));
+        if !degraded {
+            let _ = http::http_get("/quit", p, Duration::from_secs(2));
+        }
     }
     let deadline = Instant::now() + QUIT_WAIT;
     loop {
