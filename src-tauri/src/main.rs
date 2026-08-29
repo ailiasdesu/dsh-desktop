@@ -51,6 +51,17 @@ impl KernelCtl {
     }
 }
 
+/// 内核失败路径：把错误文本注入 loading 页 #status（E 规格兜底）
+pub fn set_loading_status(app: &tauri::AppHandle, text: &str) {
+    let app2 = app.clone();
+    let t = text.to_string();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = app2.get_webview_window("main") {
+            let js = format!("window.setStatus({});", serde_json::to_string(&t).unwrap_or_else(|_| "\"\"".into()));
+            let _ = w.eval(&js);
+        }
+    });
+}
 pub struct TrayHandle(pub tauri::tray::TrayIcon);
 pub struct TrayState(pub tauri::tray::TrayIcon);
 

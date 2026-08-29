@@ -411,6 +411,7 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
                 }
                 eprintln!("[kernel] crashed too many times, giving up");
                 if !smoke {
+                    crate::set_loading_status(&app, "内核反复崩溃，已停止自动重启：请检查更新或查看日志后重试。");
                     crate::jobobject::show_error(
                         "DSH Desktop - 内核反复崩溃",
                         "DSH 内核短时间内连续崩溃，已停止自动重启。\n请检查更新或查看日志后重试。",
@@ -473,6 +474,7 @@ fn launch_once(
                 "DSH Desktop - 内核启动失败",
                 &format!("{e}\n\n请检查 node/kernel 路径配置（settings.json）。"),
             );
+            crate::set_loading_status(app, "内核启动失败：请检查设置或日志后重试。");
             return LaunchOutcome::Stopped;
         }
     };
@@ -525,6 +527,9 @@ fn launch_once(
                 if Instant::now() >= deadline {
                     eprintln!("[kernel] ready timeout(30s)");
                     graceful_stop(&mut child, job.as_ref(), None, degraded);
+                    if !smoke {
+                        crate::set_loading_status(app, "内核启动超时（30s）：请查看日志后重试。");
+                    }
                     return if smoke {
                         LaunchOutcome::SmokeFail
                     } else {
