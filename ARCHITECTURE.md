@@ -332,6 +332,7 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
 | D10 | 独立数据模式（B） | ✅ 已实现：托盘 CheckMenuItem 切换 settings.dsh_home=app_data/dsh-home（mkdir）或回共享；切换即重启内核（每轮重载 settings/resolve）；菜单初始态读 settings | v0.2 |
 | D11 | M5 自启+深链（C） | ✅ 已实现：HKCU Run 自启（windows-sys 原生 API，规避 reg.exe 引号解析）+ dsh-desktop:// 协议幂等注册（URL Protocol + shell\open\command）；第二实例深链参数由 single-instance 聚焦（v1 不解析参数）；卸载不清理协议键 | v0.2 |
 | D12 | 破坏性更新保护（D） | ✅ 已实现：prepare 后追加 smoke_kernel_with_patch（临时 home+patch→就绪→/health 200→/quit），不兼容→清理 kernel.new+报错不换版本；运行时降级兜底：崩溃超限→无 patch 尝试一次，成功→degraded 警告+退出跳过 /quit 直接树杀；--smoke 保持非零 | v0.2 |
+| D14 | 低内存预警看门狗（F） | ✅ 已实现：阶段2 每 30s GlobalMemoryStatusEx 可用提交内存，<1536MB（settings.memory_warn_mb，0=关）弹一次警告（AtomicBool 防重复，独立线程非阻塞）；滞回 >2.5GB 重置；纯函数 memory_warn_transition 单测覆盖阈值/滞回 | v0.2 |
 | D13 | 性能（E） | ✅ 已实现：setup 即建 loading.html 立即窗口（内核就绪后导航）；WebView2 additional_browser_args 合并防节流（hw=false 追加 --disable-gpu）；NODE_OPTIONS=--max-old-space-size=4096；boost_priority→SetPriorityClass ABOVE_NORMAL | v0.2 |
 
 ---

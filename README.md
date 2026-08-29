@@ -18,6 +18,7 @@ DSH (DeepSeek Harness) 桌面版：Tauri 2.x (Rust) 原生 Windows 壳，属主�
 - **开机自启 + 深链**：托盘→开机自启（HKCU Run）；dsh-desktop:// 协议启动即幂等注册（卸载不清理该键）。
 - **破坏性更新保护**：新版本必须先通过「带桌面插件全冒烟」（就绪→/health→/quit），不兼容即保持当前版本；启动崩溃超限自动降级（无插件运行并提示，退出强制结束）。
 - **性能**：立即窗口（loading.html 1s 内可见）→ 内核就绪自动进 UI；WebView2 防节流参数；NODE_OPTIONS 默认 4G 堆；内核 ABOVE_NORMAL 优先级。
+- **低内存预警看门狗**：每 30s 检测系统可用提交内存，<1536MB 弹一次警告（滞回 >2.5GB 恢复）；settings.memory_warn_mb 可配（0=关闭）。
 - settings.json 新字段（旧文件兼容默认值）：hardware_acceleration / node_options / boost_priority。
 
 ## 安装包（D6 方案 B 全捆绑 · 用户拍板 2026-08-29）

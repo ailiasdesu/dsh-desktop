@@ -31,6 +31,48 @@ pub enum KernelEvent {
 }
 
 /// 就绪行契约：dsh web: http://127.0.0.1:<port>
+/// 低内存滞回状态机（F 纯函数，可单测）：
+/// 参数：mem_mb=当前可用提交内存(MB)；warn_mb=预警阈值(0=关)；reset_mb=恢复阈值(滞回)；warned=当前是否已弹过。
+/// 返回：(should_warn, next_warned)——should_warn=本次是否弹；next_warned=下一状态。
+pub fn memory_warn_transition(mem_mb: u64, warn_mb: u64, reset_mb: u64, warned: bool) -> (bool, bool) {
+    if warn_mb == 0 {
+        return (false, false);
+    }
+    if mem_mb < warn_mb {
+        if warned {
+            (false, true) // 已在提醒状态，不重复弹（直到恢复）
+        } else {
+            (true, true)
+        }
+    } else if mem_mb > reset_mb {
+        (false, false) // 恢复区：重置
+    } else {
+        (false, warned) // 滞回区：保持
+    }
+}
+
+/// 系统可用提交内存（MB）：GlobalMemoryStatusEx；非 Windows 返回 u64::MAX（不预警）
+pub fn system_avail_commit_mb() -> u64 {
+    #[cfg(windows)]
+    {
+        use std::mem::MaybeUninit;
+        use windows_sys::Win32::System::SystemInformation::{
+            GlobalMemoryStatusEx, MEMORYSTATUSEX,
+        };
+        let mut st: MEMORYSTATUSEX = unsafe { MaybeUninit::zeroed().assume_init() };
+        st.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        let ok = unsafe { GlobalMemoryStatusEx(&mut st) };
+        if ok != 0 {
+            return (st.ullAvailPageFile >> 20) as u64;
+        }
+        u64::MAX
+    }
+    #[cfg(not(windows))]
+    {
+        u64::MAX
+    }
+}
+
 pub fn parse_port_from_line(line: &str) -> Option<u16> {
     if !line.contains("dsh web: http://127.0.0.1:") {
         return None;
@@ -541,7 +583,8 @@ fn launch_once(
     let url = format!("http://127.0.0.1:{port}/");
     show_or_redirect(app, &url);
 
-    // 阶段 2：运行中监测（停止请求 / 更新重启请求 / 崩溃检测）
+    // 阶段 2：运行中监测（停止请求 / 更新重启请求 / 崩溃检测 / F 低内存看门狗）
+    let mut next_mem_check = Instant::now() + Duration::from_secs(30);
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
             graceful_stop(&mut child, job.as_ref(), Some(port), degraded);
@@ -551,6 +594,26 @@ fn launch_once(
             eprintln!("[kernel] update restart requested");
             graceful_stop(&mut child, job.as_ref(), Some(port), degraded);
             return LaunchOutcome::Restart;
+        }
+        // F：低内存预警看门狗（每 30s；弹窗独立线程，不阻塞监测）
+        if Instant::now() >= next_mem_check {
+            next_mem_check = Instant::now() + Duration::from_secs(30);
+            let mem = system_avail_commit_mb();
+            let warn_mb = settings.memory_warn_mb;
+            let reset_mb = if warn_mb == 0 { 0 } else { (warn_mb * 3).max(2500) };
+            let (should, next) =
+                memory_warn_transition(mem, warn_mb, reset_mb, ctl.mem_warned.load(Ordering::SeqCst));
+            ctl.mem_warned.store(next, Ordering::SeqCst);
+            if should {
+                let msg = format!(
+                    "系统可用内存严重不足（提交内存剩 {mem} MB），DSH 内核可能被系统终止。\n请关闭占用内存的程序或重启电脑。"
+                );
+                eprintln!("[kernel] LOW_MEMORY: {mem} MB");
+                if !smoke {
+                    let m = msg.clone();
+                    std::thread::spawn(move || crate::jobobject::show_error("DSH Desktop - 内存不足", &m));
+                }
+            }
         }
         match child.try_wait() {
             Ok(Some(_st)) => {
@@ -633,6 +696,22 @@ fn show_or_redirect(app: &tauri::AppHandle, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_warn_hysteresis() {
+        // 关闭
+        assert_eq!(memory_warn_transition(100, 0, 0, false), (false, false));
+        // 首次触发（<1536）
+        assert_eq!(memory_warn_transition(1200, 1536, 3072, false), (true, true));
+        // 已提醒再低：不重复弹
+        assert_eq!(memory_warn_transition(900, 1536, 3072, true), (false, true));
+        // 滞回区（1536..3072 之间）保持 true
+        assert_eq!(memory_warn_transition(2000, 1536, 3072, true), (false, true));
+        // 恢复区（>3072）重置
+        assert_eq!(memory_warn_transition(3600, 1536, 3072, true), (false, false));
+        // 恢复后再降：重新可弹
+        assert_eq!(memory_warn_transition(1000, 1536, 3072, false), (true, true));
+    }
 
     #[test]
     fn parse_ready_line() {

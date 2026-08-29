@@ -28,6 +28,8 @@ pub struct AppSettings {
     pub node_options: String,
     /// 内核子进程优先级提升（E：ABOVE_NORMAL）
     pub boost_priority: bool,
+    /// 低内存预警（F）：可用提交内存低于该 MB 值弹一次警告；0=关闭（默认 1536）
+    pub memory_warn_mb: u64,
 }
 
 impl Default for AppSettings {
@@ -44,6 +46,7 @@ impl Default for AppSettings {
             hardware_acceleration: true,
             node_options: "--max-old-space-size=4096".into(),
             boost_priority: true,
+            memory_warn_mb: 1536,
         }
     }
 }

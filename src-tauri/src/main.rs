@@ -24,6 +24,8 @@ pub struct KernelCtl {
     pub degraded: Arc<AtomicBool>,
     /// D：降级警告只弹一次
     pub degraded_warned: Arc<AtomicBool>,
+    /// F：低内存警告只弹一次
+    pub mem_warned: Arc<AtomicBool>,
 }
 
 impl Default for KernelCtl {
@@ -37,6 +39,7 @@ impl Default for KernelCtl {
             updated_version: Arc::new(Mutex::new(None)),
             degraded: Arc::new(AtomicBool::new(false)),
             degraded_warned: Arc::new(AtomicBool::new(false)),
+            mem_warned: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -463,6 +466,7 @@ fn main() {
         updated_version: ctl.updated_version.clone(),
         degraded: ctl.degraded.clone(),
         degraded_warned: ctl.degraded_warned.clone(),
+        mem_warned: ctl.mem_warned.clone(),
     };
     std::thread::spawn(move || {
         let code = kernel::run_shell(handle, kernel_ctl, smoke, &data_dir);
