@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-plugin-manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "DSH plugin manager: list / enable / disable / add / remove profile bundles in the Web UI. Text-level precise edits on the profile manifest, automatic backups before every write, patch layer read-only.",
