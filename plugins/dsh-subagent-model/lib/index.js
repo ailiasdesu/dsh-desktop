@@ -8,7 +8,9 @@
  *
  * 写操作契约：唯一写入目标是 <profile>/cordis.patch.yml 的哨兵托管块；写前备份
  * （<file>.bak-sm-<epoch>，保留最近 10 份）+ 临时文件原子写；块外内容字节级不变。
- * settings.yaml 只读（模型目录）；profile package.json 不属于本插件（那是 plugin-manager 的领域）。
+ * settings.yaml 只读（模型目录 settings 侧）；内核侧目录经 ctx.get('llm') 实时枚举
+ * （与官方模型选择器同源，见 catalog.js），二者合并去重进 /list 的 catalog。
+ * profile package.json 不属于本插件（那是 plugin-manager 的领域）。
  */
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -17,6 +19,7 @@ import {
   TARGETS, atomicWrite, backupFile, cleanupBackups, findExternalTargetEntries,
   findManagedBlock, isYamlEmpty, parseCatalog, parseManagedEntries, removeManaged, upsertManaged,
 } from './store.js';
+import { kernelCatalog, mergeCatalogs } from './catalog.js';
 
 export const name = '@dsh-external/dsh-subagent-model';
 export const inject = ['webServer'];
@@ -73,7 +76,7 @@ export function apply(ctx) {
   function patchText() { try { return readFileSync(patchPath, 'utf8'); } catch { return ''; } }
   function settingsText() { try { return readFileSync(settingsPath, 'utf8'); } catch { return ''; } }
 
-  function buildList() {
+  async function buildList() {
     const text = patchText();
     const block = findManagedBlock(text);
     const broken = block !== null && block.broken === true;
@@ -93,7 +96,18 @@ export function apply(ctx) {
       blockBroken: broken ? block.reason : null,
       targets,
       conflicts: findExternalTargetEntries(text),
-      catalog: parseCatalog(settingsText()),
+      catalog: await buildCatalog(),
+    };
+  }
+
+  /** 目录 = 内核 llm 实时枚举（与官方模型选择器同源）∪ settings.yaml（去重合并，见 catalog.js）。 */
+  async function buildCatalog() {
+    const kernel = await kernelCatalog(ctx);
+    const settings = parseCatalog(settingsText());
+    return {
+      providers: mergeCatalogs(settings.providers, kernel.providers),
+      kernelAvailable: kernel.available,
+      kernelFailures: kernel.failures,
     };
   }
 
@@ -149,7 +163,7 @@ export function apply(ctx) {
   }
 
   const routes = [
-    { path: API + '/list', methods: ['GET', 'POST'], run: (_req, res) => json(res, 200, buildList()) },
+    { path: API + '/list', methods: ['GET', 'POST'], run: async (_req, res) => json(res, 200, await buildList()) },
     { path: API + '/set', methods: ['POST'], run: (_req, res, body) => handleSet(res, body) },
     { path: API + '/reset', methods: ['POST'], run: (_req, res, body) => handleReset(res, body) },
   ];
@@ -163,7 +177,7 @@ export function apply(ctx) {
           if (!isLoopbackOrigin(req.headers.origin)) return json(res, 403, { ok: false, message: 'origin 未被允许' });
           if (!route.methods.includes(req.method ?? 'GET')) return json(res, 405, { ok: false, message: '方法不允许：' + req.method });
           const body = req.method === 'POST' ? await requestBody(req) : {};
-          return route.run(req, res, body);
+          return await route.run(req, res, body);
         } catch (e) {
           return json(res, 200, { ok: false, message: String(e && e.message ? e.message : e) });
         }

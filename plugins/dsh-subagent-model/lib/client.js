@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
 		var RESET_ROUTE = "/subagent-model/api/reset";
 		var STYLE_ID = "sm-subagent-model-style";
 		var NL = String.fromCharCode(10);
+		var CUSTOM = "__sm-custom__";
 
 		// ---------------------------------------------------------------------------
 		// 纯工具
@@ -79,6 +80,8 @@ window.__ModuleLoader__.load({
 				".sm-eff-sub{color:var(--dsw-alias-content-secondary,#9b9b9b);font-size:11px;white-space:nowrap}",
 				".sm-select{background:var(--dsw-alias-surface-sunken,#161617);border:1px solid var(--dsw-alias-stroke-default,#3a3a3a);color:inherit;border-radius:6px;padding:4px 8px;font-size:12px;max-width:200px}",
 				".sm-select:disabled{opacity:.5}",
+				".sm-input{display:block;margin-top:4px;background:var(--dsw-alias-surface-sunken,#161617);border:1px solid var(--dsw-alias-stroke-default,#3a3a3a);color:inherit;border-radius:6px;padding:4px 8px;font-size:12px;max-width:200px;box-sizing:border-box}",
+				".sm-input[data-invalid='true']{border-color:var(--dsw-alias-state-error-primary,#ff9b9b)}",
 				".sm-ops{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:nowrap}",
 				".sm-act{border:1px solid var(--dsw-alias-stroke-default,#3a3a3a);background:#ffffff0d;color:inherit;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}",
 				".sm-act:hover{background:#ffffff1a}",
@@ -116,6 +119,61 @@ window.__ModuleLoader__.load({
 			return null;
 		}
 
+		/** 自定义直填：选中「自定义…」后取就地文本框的值（trim），否则取下拉值。 */
+		function resolveSel(sel, input) { return sel.value === CUSTOM ? input.value.trim() : sel.value; }
+
+		function readRowState(row) {
+			return {
+				prov: row.provSel.value, provText: row.provInput.value,
+				model: row.modelSel.value, modelText: row.modelInput.value,
+				effort: row.effortSel.value, effortText: row.effortInput.value,
+			};
+		}
+
+		function applyRowState(row, s) {
+			row.provSel.value = s.prov;
+			row.provInput.value = s.provText;
+			rebuildModelSel(row, s.model);
+			row.modelInput.value = s.modelText;
+			rebuildEffortSel(row, s.effort);
+			row.effortInput.value = s.effortText;
+			updateCustomVisibility(row);
+			syncSaveState(row);
+		}
+
+		function updateCustomVisibility(row) {
+			row.provInput.style.display = row.provSel.value === CUSTOM ? "" : "none";
+			row.modelInput.style.display = row.modelSel.value === CUSTOM ? "" : "none";
+			row.effortInput.style.display = row.effortSel.value === CUSTOM ? "" : "none";
+		}
+
+		/** Esc 取消：恢复进入自定义前的最后稳定状态（provider 级取消连带恢复 model/effort）。 */
+		function cancelCustom(row, kind) {
+			var prev = row.prevState;
+			var cur = readRowState(row);
+			var next;
+			if (kind === "prov") next = prev;
+			else if (kind === "model") next = { prov: cur.prov, provText: cur.provText, model: prev.model, modelText: prev.modelText, effort: prev.effort, effortText: prev.effortText };
+			else next = { prov: cur.prov, provText: cur.provText, model: cur.model, modelText: cur.modelText, effort: prev.effort, effortText: prev.effortText };
+			applyRowState(row, next);
+			row.prevState = readRowState(row);
+		}
+
+		function customInput(row, placeholder, kind) {
+			var input = el("input", "sm-input");
+			input.type = "text";
+			input.placeholder = placeholder;
+			input.style.display = "none";
+			input.addEventListener("input", function () { syncSaveState(row); });
+			input.addEventListener("change", function () {
+				if (input.value.trim() !== "") row.prevState = readRowState(row);
+			});
+			input.addEventListener("keydown", function (ev) {
+				if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); cancelCustom(row, kind); }
+			});
+			return input;
+		}
+
 		/** 重建模型下拉：随提供商联动；保留 keep（当前生效值不在目录时追加"目录外"项）。 */
 		function rebuildModelSel(row, keep) {
 			var sel = row.modelSel;
@@ -128,7 +186,8 @@ window.__ModuleLoader__.load({
 				if (models[i].name && models[i].name !== models[i].id) o.title = models[i].name;
 				sel.appendChild(o);
 			}
-			if (keep && !findModel(prov, keep)) sel.appendChild(opt(keep, keep + "（目录外）"));
+			if (keep && keep !== CUSTOM && !findModel(prov, keep)) sel.appendChild(opt(keep, keep + "（目录外）"));
+			sel.appendChild(opt(CUSTOM, "自定义…"));
 			sel.value = keep || "";
 			sel.disabled = row.provSel.value === "";
 		}
@@ -142,14 +201,21 @@ window.__ModuleLoader__.load({
 			var model = findModel(prov, row.modelSel.value);
 			var efforts = (model && model.efforts) || [];
 			for (var i = 0; i < efforts.length; i++) sel.appendChild(opt(efforts[i], efforts[i]));
-			if (keep && efforts.indexOf(keep) < 0) sel.appendChild(opt(keep, keep + "（目录外）"));
+			if (keep && keep !== CUSTOM && efforts.indexOf(keep) < 0) sel.appendChild(opt(keep, keep + "（目录外）"));
+			sel.appendChild(opt(CUSTOM, "自定义…"));
 			sel.value = keep || "";
 			sel.disabled = row.modelSel.value === "";
 			if (model && efforts.length === 0) sel.title = "该模型在 settings.yaml 中未声明 reasoningEfforts";
 		}
 
 		function syncSaveState(row) {
-			row.saveBtn.disabled = row.provSel.value === "" || row.modelSel.value === "";
+			var prov = resolveSel(row.provSel, row.provInput);
+			var model = resolveSel(row.modelSel, row.modelInput);
+			var effortCustomEmpty = row.effortSel.value === CUSTOM && row.effortInput.value.trim() === "";
+			row.provInput.dataset.invalid = String(row.provSel.value === CUSTOM && prov === "");
+			row.modelInput.dataset.invalid = String(row.modelSel.value === CUSTOM && model === "");
+			row.effortInput.dataset.invalid = String(effortCustomEmpty);
+			row.saveBtn.disabled = prov === "" || model === "" || effortCustomEmpty;
 		}
 
 		function effectiveCell(target) {
@@ -184,20 +250,28 @@ window.__ModuleLoader__.load({
 				row.provSel = el("select", "sm-select");
 				row.provSel.appendChild(opt("", "— 选择提供商 —"));
 				var provs = (data.catalog && data.catalog.providers) || [];
-				for (var i = 0; i < provs.length; i++) row.provSel.appendChild(opt(provs[i].name, provs[i].name));
+				for (var i = 0; i < provs.length; i++) {
+					var po = opt(provs[i].name, provs[i].name);
+					if (provs[i].source) po.title = "来源：" + provs[i].source;
+					row.provSel.appendChild(po);
+				}
 				var curProv = target.effective ? target.effective.provider : "";
 				if (curProv && !findProvider(data.catalog, curProv)) row.provSel.appendChild(opt(curProv, curProv + "（目录外）"));
+				row.provSel.appendChild(opt(CUSTOM, "自定义…"));
 				row.provSel.value = curProv;
-				tdProv.appendChild(row.provSel);
+				row.provInput = customInput(row, "直填提供商名", "prov");
+				tdProv.append(row.provSel, row.provInput);
 
 				var tdModel = document.createElement("td");
 				row.modelSel = el("select", "sm-select");
-				tdModel.appendChild(row.modelSel);
+				row.modelInput = customInput(row, "直填模型 ID", "model");
+				tdModel.append(row.modelSel, row.modelInput);
 
 				var tdEffort = document.createElement("td");
 				row.effortSel = el("select", "sm-select");
 				row.effortSel.title = "内核 schema 未声明、实测透传生效的字段";
-				tdEffort.appendChild(row.effortSel);
+				row.effortInput = customInput(row, "直填思考强度", "effort");
+				tdEffort.append(row.effortSel, row.effortInput);
 
 				var tdOps = document.createElement("td");
 				var ops = el("div", "sm-ops");
@@ -211,18 +285,31 @@ window.__ModuleLoader__.load({
 
 				rebuildModelSel(row, target.effective ? target.effective.model : "");
 				rebuildEffortSel(row, target.effective && target.effective.reasoningEffort ? target.effective.reasoningEffort : "");
+				updateCustomVisibility(row);
+				row.prevState = readRowState(row);
 				syncSaveState(row);
 
 				row.provSel.addEventListener("change", function () {
 					rebuildModelSel(row, "");
 					rebuildEffortSel(row, "");
+					updateCustomVisibility(row);
+					if (row.provSel.value === CUSTOM) row.provInput.focus();
+					else row.prevState = readRowState(row);
 					syncSaveState(row);
 				});
 				row.modelSel.addEventListener("change", function () {
 					rebuildEffortSel(row, "");
+					updateCustomVisibility(row);
+					if (row.modelSel.value === CUSTOM) row.modelInput.focus();
+					else row.prevState = readRowState(row);
 					syncSaveState(row);
 				});
-				row.effortSel.addEventListener("change", function () { syncSaveState(row); });
+				row.effortSel.addEventListener("change", function () {
+					updateCustomVisibility(row);
+					if (row.effortSel.value === CUSTOM) row.effortInput.focus();
+					else row.prevState = readRowState(row);
+					syncSaveState(row);
+				});
 				row.saveBtn.addEventListener("click", function () { void doSave(st, row); });
 				row.resetBtn.addEventListener("click", function () { void doReset(st, row); });
 
@@ -233,8 +320,17 @@ window.__ModuleLoader__.load({
 		}
 
 		async function doSave(st, row) {
-			var body = { id: row.target.id, provider: row.provSel.value, model: row.modelSel.value };
-			if (row.effortSel.value !== "") body.reasoningEffort = row.effortSel.value;
+			var provider = resolveSel(row.provSel, row.provInput);
+			var model = resolveSel(row.modelSel, row.modelInput);
+			var effortIsCustom = row.effortSel.value === CUSTOM;
+			var effort = effortIsCustom ? row.effortInput.value.trim() : row.effortSel.value;
+			if (provider === "" || model === "" || (effortIsCustom && effort === "")) {
+				toast(st, "自定义值不能为空：请在文本框直填，或按 Esc 取消恢复原选择", "err");
+				syncSaveState(row);
+				return;
+			}
+			var body = { id: row.target.id, provider: provider, model: model };
+			if (effort !== "") body.reasoningEffort = effort;
 			row.saveBtn.disabled = true;
 			try {
 				var resp = await postJson(SET_ROUTE, body);
@@ -272,10 +368,16 @@ window.__ModuleLoader__.load({
 					if (resp.conflicts && resp.conflicts.length > 0) {
 						warn.push("⚠️ 托管块之外已存在 " + resp.conflicts.map(function (c) { return c.id + "（第 " + c.line + " 行）"; }).join("、") + " 条目：保存会被拒绝。请先手工删除或迁移该条目，再用本页管理。");
 					}
+					if (resp.catalog && resp.catalog.kernelAvailable === false) {
+						warn.push("ℹ️ 内核模型枚举不可用（llm 服务未注册），目录仅来自 settings.yaml。");
+					}
+					if (resp.catalog && resp.catalog.kernelFailures && resp.catalog.kernelFailures.length > 0) {
+						warn.push("⚠️ 内核枚举部分提供商失败：" + resp.catalog.kernelFailures.map(function (f) { return f.provider; }).join("、"));
+					}
 					st.conflictBox.textContent = warn.join(NL);
 					st.conflictBox.style.display = warn.length > 0 ? "block" : "none";
 					var noCat = !resp.catalog || !resp.catalog.providers || resp.catalog.providers.length === 0;
-					if (noCat) toast(st, "模型目录为空：未在 settings.yaml 找到 llm-pi-ai.providers", "err");
+					if (noCat) toast(st, "模型目录为空（内核枚举与 settings.yaml 均无提供商）：可用下拉中的「自定义…」直填", "err");
 					renderRows(st, resp);
 				} else {
 					toast(st, "列表接口失败：" + (resp && resp.message ? resp.message : "未知错误"), "err");
@@ -322,7 +424,7 @@ window.__ModuleLoader__.load({
 			t.append(thead, tbody);
 			table.appendChild(t);
 			root.appendChild(table);
-			var note = el("div", "sm-note", "说明：「思考强度」（reasoningEffort）是内核 agentOptions schema 未声明、但实测被原样透传并生效的字段（schemastery 保留未声明键）；官方若收紧校验，该项可能失效。模型目录只读自 settings.yaml 的 llm-pi-ai.providers；maxTokens 可经 API 设置，本页不提供输入。");
+			var note = el("div", "sm-note", "说明：「思考强度」（reasoningEffort）是内核 agentOptions schema 未声明、但实测被原样透传并生效的字段（schemastery 保留未声明键）；官方若收紧校验，该项可能失效。模型目录 = 内核 llm 服务实时枚举（与官方模型选择器同源，含内置提供商）∪ settings.yaml 的 llm-pi-ai.providers（按提供商名与模型 id 合并去重，悬停选项可见来源）；三个下拉均有「自定义…」——选中后就地直填任意串（空串拒绝保存，Esc 取消恢复原选择）。maxTokens 可经 API 设置，本页不提供输入。");
 			root.appendChild(note);
 			host.appendChild(root);
 

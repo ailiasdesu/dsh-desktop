@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-subagent-model",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "DSH subagent model settings: pin provider / model / reasoningEffort for subagent & subagent_fork from the Web UI. Sentinel-managed block in the profile cordis.patch.yml, byte-identical content outside the block, automatic backups, settings.yaml read-only.",
@@ -46,7 +46,7 @@
     "react-dom": "^18.2.0"
   },
   "scripts": {
-    "build": "node --check lib/index.js && node --check lib/store.js && node --check lib/client.js",
+    "build": "node --check lib/index.js && node --check lib/store.js && node --check lib/client.js && node --check lib/catalog.js",
     "prepack": "npm run build",
     "check": "node tests/unit.mjs"
   }

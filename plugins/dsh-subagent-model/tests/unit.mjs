@@ -5,6 +5,7 @@ import {
   findExternalTargetEntries, normalizeSettings, upsertManaged, removeManaged,
   parseCatalog, backupFile, cleanupBackups, atomicWrite, isYamlEmpty,
 } from '../lib/store.js';
+import { kernelCatalog, mergeCatalogs } from '../lib/catalog.js';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -263,6 +264,69 @@ console.log('== 15. 原子写无残留 ==');
 atomicWrite(target, a4.text);
 assert(readFileSync(target, 'utf8') === a4.text, 'atomic write applied');
 assert(readdirSync(work).filter((n) => n.indexOf('.tmp-sm-') >= 0).length === 0, 'no tmp leftovers');
+
+console.log('== 16. 自定义直填（目录外任意串）set 往返 ==');
+const pin = upsertManaged(FIXTURE, 'tool-subagent', { provider: 'deepseek-official', model: 'deepseek-v4-flash-vision-exp', reasoningEffort: 'high' });
+assert(pin.ok && pin.changed, 'builtin provider pinned (主用例：目录外内置提供商)');
+const pinE = parseManagedEntries(findManagedBlock(pin.text).body);
+assert(pinE['tool-subagent'].provider === 'deepseek-official' && pinE['tool-subagent'].model === 'deepseek-v4-flash-vision-exp' && pinE['tool-subagent'].reasoningEffort === 'high', 'headline values roundtrip');
+assert(pin.text.slice(0, FIXTURE.length) === FIXTURE, 'pin keeps prefix bytes');
+const weird = { provider: 'my provider: v2', model: '模型/α β', reasoningEffort: "ultra 'x' 强" };
+const wf = upsertManaged('', 'tool-subagent-fork', weird);
+assert(wf.ok, 'arbitrary strings accepted (space/colon/CJK/quote)');
+const wfE = parseManagedEntries(findManagedBlock(wf.text).body);
+assert(wfE['tool-subagent-fork'].provider === weird.provider && wfE['tool-subagent-fork'].model === weird.model && wfE['tool-subagent-fork'].reasoningEffort === weird.reasoningEffort, 'arbitrary strings roundtrip');
+assert(normalizeSettings({ provider: '  ', model: 'm' }).ok === false, 'whitespace-only provider refused (空串校验兜底)');
+assert(normalizeSettings({ provider: 'p', model: '  ' }).ok === false, 'whitespace-only model refused');
+
+console.log('== 17. mergeCatalogs（内核∪settings 去重合并）==');
+const kern = [
+  { name: 'deepseek-official', models: [{ id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision (exp)', efforts: ['low', 'high'] }] },
+  { name: 'gorouter', models: [{ id: 'claude-opus-5', name: 'Claude Opus 5', efforts: ['off', 'max'] }] },
+];
+const merged = mergeCatalogs(cat.providers, kern);
+assert(merged.map((p) => p.name).join(',') === 'deepseek-official,gorouter,opencode-go,openrouter', 'kernel first, settings-only appended, dedupe by name');
+const mGr = merged.find((p) => p.name === 'gorouter');
+assert(mGr.source === 'kernel+settings', 'both-source provider labeled');
+assert(mGr.models.length === 1, 'same model id deduped');
+assert(mGr.models[0].efforts.join(',') === 'off,max,minimal,low,medium,high,xhigh', 'efforts union keeps kernel order then settings extras');
+assert(mGr.models[0].contextWindow === 1000000 && mGr.models[0].maxTokens === 65536, 'settings numbers backfill kernel entry');
+const mDs = merged.find((p) => p.name === 'deepseek-official');
+assert(mDs.source === 'kernel' && mDs.models[0].id === 'deepseek-v4-flash-vision-exp', 'kernel-only provider present');
+const mOg = merged.find((p) => p.name === 'opencode-go');
+assert(mOg.source === 'settings' && mOg.models.length === 2, 'settings-only provider intact');
+assert(mergeCatalogs([], []).length === 0, 'empty merge');
+assert(mergeCatalogs(cat.providers, []).length === 3, 'kernel absent → settings only');
+
+console.log('== 18. kernelCatalog（伪 ctx.llm 枚举 + 容错）==');
+const fakeLlm = {
+  listProviders() { return [{ id: 'deepseek-official', name: 'DeepSeek' }, { id: 'broken', name: 'Broken' }]; },
+  async listModels(id) {
+    if (id === 'broken') throw new Error('adapter offline');
+    return [{ id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision (exp)' }, { id: 'no-efforts' }];
+  },
+  async resolveModelInfo(_id, modelId) {
+    if (modelId === 'no-efforts') return {};
+    return { reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'low' } };
+  },
+};
+const kc = await kernelCatalog({ get: (k) => (k === 'llm' ? fakeLlm : undefined) });
+assert(kc.available === true && kc.providers.length === 1, 'available; broken provider dropped to failures');
+assert(kc.providers[0].name === 'deepseek-official' && kc.providers[0].models.length === 2, 'models mapped');
+assert(kc.providers[0].models[0].efforts.join(',') === 'low,high', 'reasoning efforts ids extracted');
+assert(kc.providers[0].models[1].efforts.length === 0 && kc.providers[0].models[1].name === 'no-efforts', 'no reasoning → empty efforts; name falls back to id');
+assert(kc.failures.length === 1 && kc.failures[0].provider === 'broken', 'per-provider failure captured');
+const kcNo = await kernelCatalog({ get: () => undefined });
+assert(kcNo.available === false && kcNo.providers.length === 0, 'llm service absent → unavailable');
+const kcNoGet = await kernelCatalog({});
+assert(kcNoGet.available === false, 'ctx without get() → unavailable');
+
+console.log('== 19. client.js 静态断言（自定义直填接线）==');
+const clientSrc = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+assert(clientSrc.indexOf('__sm-custom__') >= 0, 'CUSTOM sentinel present');
+assert(clientSrc.split('自定义…').length - 1 >= 3, 'custom option appended in all three dropdown paths');
+assert(clientSrc.indexOf('resolveSel') >= 0 && clientSrc.indexOf('cancelCustom') >= 0, 'resolve/cancel helpers wired');
+assert(clientSrc.indexOf('kernelFailures') >= 0 && clientSrc.indexOf('kernelAvailable') >= 0, 'kernel catalog status surfaced');
 
 rmSync(work, { recursive: true, force: true });
 console.log(failed === 0 ? 'ALL TESTS PASSED' : failed + ' TEST(S) FAILED');

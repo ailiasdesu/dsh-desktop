@@ -14,8 +14,20 @@ DSH 设置页「子代理模型」：为标准子代理委派工具 **subagent**
 - reasoningEffort 未在 agentOptions schema 声明，但 @deepseek-ai/schemastery 的 z.object
   **保留未声明键**，dsh-tool-subagent 原样透传、dsh-subagent 以 ...requested 展开、dsh-agent
   将其按一等字段解析——实测生效。**属"未声明但透传"的字段，官方若收紧校验可能失效**（UI 已如实标注）。
-- 模型目录只读自 ~/.dsh/settings.yaml 的 llm-pi-ai.providers.<名>.models[]
-  （id / name / contextWindow / maxTokens / reasoningEfforts 键表）。
+- 模型目录 = **内核实时枚举 ∪ settings.yaml**（lib/catalog.js 合并去重）：
+  - 内核侧与官方模型选择 UI 同源——dsh-host-apiproxy 对 session.models / llm.models 两个 RPC
+    的实现 buildModelCatalog(ctx) = ctx.llm.listProviders() → listModels(id) →
+    resolveModelInfo(id, modelId)（reasoning.efforts[].id 即思考强度目录）；本插件宿主侧经
+    同一 cordis 服务 ctx.get('llm')（@deepseek-ai/dsh-llm 的 LlmRuntime）复刻该枚举，
+    因此 deepseek-official 等内置提供商（不在 settings.yaml）也进目录。
+  - settings 侧只读自 ~/.dsh/settings.yaml 的 llm-pi-ai.providers.<名>.models[]
+    （id / name / contextWindow / maxTokens / reasoningEfforts 键表）。
+  - 合并策略：按 provider name / model id 去重，内核在前、settings 独有追加在后，
+    efforts 取并集保序（内核先），contextWindow/maxTokens 互为回填，source 标注
+    kernel / settings / kernel+settings；llm 服务缺席时 kernelAvailable=false，
+    目录退化为 settings 单源，单 provider 枚举失败进 kernelFailures 不拖垮目录。
+- 目录仅是建议（advisory）：三个下拉均有「自定义…」就地直填任意串，保存走同一 set
+  路径（normalizeSettings 除换行与 # 外接受任意串）——目录拿不到的路由也能钉。
 
 ## 写入契约（红线）
 
@@ -45,7 +57,8 @@ DSH 设置页「子代理模型」：为标准子代理委派工具 **subagent**
 - GET|POST /subagent-model/api/list
   -> { ok, profile, patchFile, settingsFile, blockBroken, targets:[{id, toolName, mode, managed,
        effective:{provider,model,reasoningEffort?,maxTokens?}|null}], conflicts:[{line,id}],
-       catalog:{providers:[{name, models:[{id, name, contextWindow, maxTokens, efforts:[...]}]}]} }
+       catalog:{providers:[{name, source, models:[{id, name, contextWindow, maxTokens, efforts:[...]}]}],
+                kernelAvailable, kernelFailures:[{provider,message}]} }
 - POST /subagent-model/api/set   { id, provider, model, reasoningEffort?, maxTokens? }
   -> { ok, needRestart:true, message, backup, block }
 - POST /subagent-model/api/reset { id }
@@ -57,6 +70,10 @@ DSH 设置页「子代理模型」：为标准子代理委派工具 **subagent**
 "继承主会话"）+ 提供商下拉 + 模型下拉（随提供商联动）+ 思考强度下拉（选项取自该模型的
 reasoningEfforts 键，附"跟随继承"项）+ 保存 / 恢复继承；顶部「重启 DSH 后生效」提示条；
 表格下方小字说明 reasoningEffort 的透传性质。当前生效值不在目录中时下拉追加"（目录外）"项。
+三个下拉末尾均有「自定义…」：选中后就地出现文本输入框直填任意串（空串禁止保存并标红，
+Esc 取消恢复进入自定义前的选择；provider 级取消连带恢复 model/effort），保存走现有 set 路径。
+提供商选项悬停显示来源（kernel / settings / kernel+settings）；llm 服务未就绪或部分枚举失败时
+顶部提示条如实标注。
 
 ## 安装（web profile）
 
@@ -70,10 +87,11 @@ reasoningEfforts 键，附"跟随继承"项）+ 保存 / 恢复继承；顶部�
 
 ## 开发
 
-- node --check lib/index.js lib/store.js lib/client.js（npm run build）
-- node tests/unit.mjs（npm run check；74 断言：托管块插入/更新/移除幂等、块外字节不变、
+- node --check lib/index.js lib/store.js lib/client.js lib/catalog.js（npm run build）
+- node tests/unit.mjs（npm run check；106 断言：托管块插入/更新/移除幂等、块外字节不变、
   冲突条目拒写、哨兵破损拒写、备份轮替 keep10、原子写无残留、catalog 解析、按模型给出
-  efforts、CRLF 保持、YAML 引号转义）
+  efforts、CRLF 保持、YAML 引号转义、自定义直填任意串 set 往返、mergeCatalogs 去重合并、
+  kernelCatalog 伪 ctx.llm 枚举容错、client.js 自定义接线静态断言）
 - 冒烟（隔离 DSH_HOME，勿碰真实 ~/.dsh）：临时 home 里 junction 内核 node_modules 与本插件，
   最小 bundles [@deepseek-ai/dsh-base, @deepseek-ai/dsh-web-app, 本插件] 启动
   node <kernel>/lib/bin.js web --no-open --port 0，就绪行 "dsh web: http://127.0.0.1:<port>"。
