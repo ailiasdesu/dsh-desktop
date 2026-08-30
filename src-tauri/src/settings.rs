@@ -32,6 +32,10 @@ pub struct AppSettings {
     pub memory_warn_mb: u64,
     /// B（v0.2.1）：更新镜像冒烟就绪后的健康断言路由（逐条 GET 须 2xx）；空数组=跳过
     pub health_routes: Vec<String>,
+    /// C（v0.2.1）：安全模式——用最小 profile（仅官方 dsh-base/dsh-web-app）启动，禁用第三方插件
+    pub safe_mode: bool,
+    /// C（v0.2.1）：安全模式 profile 名（<DSH_HOME>/profiles/<safe_profile>），缺省 dsh-safe
+    pub safe_profile: String,
 }
 
 impl Default for AppSettings {
@@ -50,6 +54,8 @@ impl Default for AppSettings {
             boost_priority: true,
             memory_warn_mb: 1536,
             health_routes: vec!["/plugin-manager/api/list".into()],
+            safe_mode: false,
+            safe_profile: "dsh-safe".into(),
         }
     }
 }
@@ -99,6 +105,8 @@ mod tests {
     fn defaults_v021_fields() {
         let s = AppSettings::default();
         assert_eq!(s.health_routes, vec!["/plugin-manager/api/list".to_string()]);
+        assert!(!s.safe_mode);
+        assert_eq!(s.safe_profile, "dsh-safe");
     }
 
     #[test]
@@ -107,6 +115,8 @@ mod tests {
         let old = r#"{"update_channel":"latest","auto_check_update":true,"port_mode":"auto","dsh_home":"","telemetry_disabled":true,"keep_old_kernel":true,"node_path":"","kernel_path":"","hardware_acceleration":true,"node_options":"","boost_priority":true,"memory_warn_mb":1536}"#;
         let s: AppSettings = serde_json::from_str(old).expect("old settings must parse");
         assert_eq!(s.health_routes, vec!["/plugin-manager/api/list".to_string()]);
+        assert!(!s.safe_mode);
+        assert_eq!(s.safe_profile, "dsh-safe");
     }
 
     #[test]

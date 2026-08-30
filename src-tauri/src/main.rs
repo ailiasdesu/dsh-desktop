@@ -216,10 +216,13 @@ fn build_tray(
     let autostart = CheckMenuItemBuilder::with_id("autostart", "开机自启")
         .checked(regn::reg_is_autostart())
         .build(app)?;
+    let safemode = CheckMenuItemBuilder::with_id("safemode", "安全模式（禁用第三方插件）")
+        .checked(settings.safe_mode)
+        .build(app)?;
 
     let quit = MenuItemBuilder::with_id("quit", "退出 DSH Desktop").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&show, &check, &independent, &autostart])
+        .items(&[&show, &check, &independent, &safemode, &autostart])
         .separator()
         .item(&quit)
         .build()?;
@@ -276,6 +279,19 @@ fn build_tray(
                     },
                 );
             }
+            "safemode" => {
+                // C：切换安全模式 → 重启内核生效（最小 profile：仅官方 dsh-base/dsh-web-app）
+                let mut next = settings::AppSettings::load(&data2);
+                next.safe_mode = !next.safe_mode;
+                let _ = next.save(&data2);
+                let ask = if next.safe_mode {
+                    "已开启「安全模式」：仅加载官方基础插件（dsh-base/dsh-web-app），第三方插件全部禁用。\n内核将立即重启。"
+                } else {
+                    "已关闭「安全模式」：恢复 web profile（含全部第三方插件）。\n内核将立即重启。"
+                };
+                jobobject::show_info("DSH Desktop - 安全模式", ask);
+                ctl2.restart.store(true, Ordering::SeqCst);
+            }
             _ => {}
         })
         .build(app)
@@ -320,6 +336,10 @@ fn main() {
         .map(|v| v == "1");
     let autostart_flag: Option<bool> = std::env::args()
         .position(|a| a == "--set-autostart")
+        .and_then(|i| std::env::args().nth(i + 1))
+        .map(|v| v == "1");
+    let safe_flag: Option<bool> = std::env::args()
+        .position(|a| a == "--safe-mode")
         .and_then(|i| std::env::args().nth(i + 1))
         .map(|v| v == "1");
     let mirror_smoke_home: Option<String> = std::env::args()
@@ -368,6 +388,17 @@ fn main() {
     if let Some(flag) = autostart_flag {
         let ok = regn::reg_set_autostart(&exe_path, flag);
         println!("AUTOSTART_SET={} ok={ok}", if flag { "on" } else { "off" });
+        std::process::exit(0);
+    }
+    // C：安全模式 CLI 钩子（照 --set-independent）：--safe-mode 0|1
+    if let Some(flag) = safe_flag {
+        let data_dir = std::env::var("APPDATA")
+            .map(|a| PathBuf::from(a).join("com.dshdesktop.app"))
+            .unwrap_or_else(|_| std::env::temp_dir().join("dsh-desktop"));
+        let mut st = settings::AppSettings::load(&data_dir);
+        st.safe_mode = flag;
+        let _ = st.save(&data_dir);
+        println!("SAFE_MODE_SET={}", if flag { "on" } else { "off" });
         std::process::exit(0);
     }
     // A/B 验证钩子（运维/验收用）：--mirror-smoke <real_home>

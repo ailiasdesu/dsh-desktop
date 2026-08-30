@@ -231,6 +231,29 @@ pub fn write_patch(
     std::fs::write(patch_path, lines.join("\n"))
 }
 
+/// C：安全模式最小 profile 的 package.json 内容（纯函数可单测）——
+/// 与官方 web profile 的 dsh.profile.bundles 结构同构，仅官方两件套（禁第三方插件）
+pub fn safe_profile_json(profile: &str) -> String {
+    let v = serde_json::json!({
+        "name": format!("dsh-profile-{profile}"),
+        "private": true,
+        "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"] } }
+    });
+    serde_json::to_string_pretty(&v).expect("static safe-profile json")
+}
+
+/// C：确保 <DSH_HOME>/profiles/<safe_profile>/package.json 存在（缺则生成最小 profile）。
+/// 只创建 safe profile 自己的目录；已存在则原样保留（幂等）。绝不触碰 profiles/web。
+pub fn ensure_safe_profile(dsh_home: &Path, profile: &str) -> std::io::Result<PathBuf> {
+    let dir = dsh_home.join("profiles").join(profile);
+    let pkg = dir.join("package.json");
+    if !pkg.exists() {
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(&pkg, safe_profile_json(profile))?;
+    }
+    Ok(pkg)
+}
+
 pub fn spawn_kernel(
     res: &Resolved,
     settings: &AppSettings,
@@ -241,8 +264,22 @@ pub fn spawn_kernel(
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+    // C：安全模式经 --profile <name> 旗标启动最小 profile。实测（v0.2.1 probe）：
+    // 位置参数 web 只是 --profile web 的别名；任意 profile 名用位置参数会报
+    // "error: --profile <name> is required"，必须旗标形式；就绪行 "dsh web:" 来自
+    // dsh-web-app bundle、与 profile 名无关，解析器无需变化。
+    let profile: &str = if settings.safe_mode && !settings.safe_profile.is_empty() {
+        settings.safe_profile.as_str()
+    } else {
+        "web"
+    };
     let mut cmd = Command::new(&res.node);
-    cmd.arg(&res.bin).arg("web");
+    cmd.arg(&res.bin);
+    if profile == "web" {
+        cmd.arg("web");
+    } else {
+        cmd.arg("--profile").arg(profile);
+    }
     if let Some(p) = patch {
         cmd.arg("--patch").arg(p); // ⚠ launcher flags 必须先于应用 flags（契约 §10.1）
     }
@@ -275,7 +312,7 @@ pub fn spawn_kernel(
 
     let degraded_flag = patch.is_none();
     eprintln!(
-        "[kernel] spawn (degraded={degraded_flag}): {} {} {}",
+        "[kernel] spawn (degraded={degraded_flag}, profile={profile}): {} {} {}",
         res.node.display(),
         res.bin.display(),
         patch.map(|p| format!("--patch {}", p.display())).unwrap_or_else(|| "(no-patch)".into())
@@ -335,6 +372,13 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
         let health_js = root.join("desktop").join("health.js");
         if let Err(e) = write_patch(&res.patch, &quit_js, &health_js) {
             eprintln!("[kernel] write_patch failed: {e}");
+        }
+        // C：安全模式——启动前确保最小 profile 存在（绝不修改用户 profiles/web 任何文件）
+        if settings.safe_mode {
+            match ensure_safe_profile(&settings.real_dsh_home(), &settings.safe_profile) {
+                Ok(p) => eprintln!("[kernel] safe mode ON, profile ready: {}", p.display()),
+                Err(e) => eprintln!("[kernel] safe profile prepare failed: {e}"),
+            }
         }
         let degraded = ctl.degraded.load(Ordering::SeqCst);
         match launch_once(&app, &ctl, &res, &settings, smoke, degraded) {
@@ -411,10 +455,10 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
                 }
                 eprintln!("[kernel] crashed too many times, giving up");
                 if !smoke {
-                    crate::set_loading_status(&app, "内核反复崩溃，已停止自动重启：请检查更新或查看日志后重试。");
+                    crate::set_loading_status(&app, "内核反复崩溃，已停止自动重启：请检查更新或查看日志后重试；也可从托盘开启「安全模式（禁用第三方插件）」排查。");
                     crate::jobobject::show_error(
                         "DSH Desktop - 内核反复崩溃",
-                        "DSH 内核短时间内连续崩溃，已停止自动重启。\n请检查更新或查看日志后重试。",
+                        "DSH 内核短时间内连续崩溃，已停止自动重启。\n请检查更新或查看日志后重试。\n\n若怀疑第三方插件损坏，可在托盘菜单勾选「安全模式（禁用第三方插件）」后重新启动内核排查。",
                     );
                 } else {
                     exit_code = 2; // P1-3：冒烟失败必须非零退出
@@ -725,5 +769,35 @@ mod tests {
         assert_eq!(parse_port_from_line("nothing here"), None);
         assert_eq!(parse_port_from_line(""), None);
         assert_eq!(parse_port_from_line("dsh web: http://127.0.0.1:"), None);
+    }
+
+    #[test]
+    fn safe_profile_json_shape() {
+        let s = safe_profile_json("dsh-safe");
+        let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
+        assert_eq!(v["name"], "dsh-profile-dsh-safe");
+        let names: Vec<&str> = v["dsh"]["profile"]["bundles"]
+            .as_array()
+            .expect("bundles array")
+            .iter()
+            .filter_map(|b| b.as_str())
+            .collect();
+        assert_eq!(names, ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]);
+    }
+
+    #[test]
+    fn ensure_safe_profile_creates_and_keeps_existing() {
+        let home = std::env::temp_dir().join(format!("dsh-safe-ut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let p = ensure_safe_profile(&home, "dsh-safe").expect("create");
+        assert!(p.exists());
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).expect("json on disk");
+        assert_eq!(v["dsh"]["profile"]["bundles"].as_array().map(|a| a.len()), Some(2));
+        // 幂等：已存在不覆盖（用户手工定制的 safe profile 不被冲掉）
+        std::fs::write(&p, r#"{"user":"edited"}"#).unwrap();
+        let p2 = ensure_safe_profile(&home, "dsh-safe").expect("idempotent");
+        assert_eq!(std::fs::read_to_string(&p2).unwrap(), r#"{"user":"edited"}"#);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
