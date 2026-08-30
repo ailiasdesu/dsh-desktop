@@ -28,7 +28,7 @@ pub fn parse_wmic_line(line: &str, self_kernel_marker: &str) -> Option<String> {
         return None; // 自身安装内核
     }
     let summary = if cmd.len() > 120 {
-        format!("{}…", &cmd[..117])
+        format!("{}…", floor_char_boundary(&cmd, 117))
     } else {
         cmd
     };
@@ -102,6 +102,15 @@ pub fn detect_foreign_kernel(self_kernel_dir: &str) -> Vec<String> {
     found
 }
 
+/// P2-17：字节预算内的字符边界安全截断（中文命令行防 panic）
+fn floor_char_boundary(s: &str, max: usize) -> &str {
+    let mut end = s.len().min(max);
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn parse_ps_pair(pid: &str, cmd: &str, marker: &str) -> Option<String> {
     if !is_dsh_cmdline(&cmd.to_uppercase()) || cmd.is_empty() {
         return None;
@@ -109,12 +118,20 @@ fn parse_ps_pair(pid: &str, cmd: &str, marker: &str) -> Option<String> {
     if !marker.is_empty() && cmd.to_lowercase().contains(marker) {
         return None;
     }
-    Some(format!("pid={pid} {}", &cmd[..cmd.len().min(120)]))
+    Some(format!("pid={pid} {}", floor_char_boundary(cmd, 120)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floor_char_boundary_chinese_safe() {
+        let s = format!("x{}", "中".repeat(50));
+        let t = floor_char_boundary(&s, 117);
+        assert!(t.len() <= 117 && s.starts_with(t));
+        assert_eq!(floor_char_boundary("abc", 120), "abc");
+    }
 
     #[test]
     fn wmic_line_parse_real_layout() {
