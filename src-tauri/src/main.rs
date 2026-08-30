@@ -297,7 +297,7 @@ fn spawn_update(app: tauri::AppHandle, ctl: Arc<KernelCtl>) {
         };
         let node = kernel::resolve_node_path(&settings, &exe_dir);
         let exe2 = exe_dir.clone();
-        let (msg, prepared) = updater::run_update_flow(&kernel_root, &node, &exe2, |q| {
+        let (msg, prepared) = updater::run_update_flow(&kernel_root, &node, &exe2, &settings, |q| {
             jobobject::show_question("DSH Desktop - 更新", q)
         });
         if let Some((kernel_new, ver)) = prepared {
@@ -322,6 +322,9 @@ fn main() {
         .position(|a| a == "--set-autostart")
         .and_then(|i| std::env::args().nth(i + 1))
         .map(|v| v == "1");
+    let mirror_smoke_home: Option<String> = std::env::args()
+        .position(|a| a == "--mirror-smoke")
+        .and_then(|i| std::env::args().nth(i + 1));
     let ctl = Arc::new(KernelCtl::default());
 
     let exe_path = std::env::current_exe().unwrap_or_default();
@@ -366,6 +369,34 @@ fn main() {
         let ok = regn::reg_set_autostart(&exe_path, flag);
         println!("AUTOSTART_SET={} ok={ok}", if flag { "on" } else { "off" });
         std::process::exit(0);
+    }
+    // A/B 验证钩子（运维/验收用）：--mirror-smoke <real_home>
+    // 以 <real_home> 为镜像源对「当前内核」跑镜像冒烟+健康断言：MIRROR_SMOKE_OK/FAIL + exit 0/1
+    if let Some(home) = mirror_smoke_home {
+        let exe_dir = exe_path.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+        let data_dir = std::env::var("APPDATA")
+            .map(|a| PathBuf::from(a).join("com.dshdesktop.app"))
+            .unwrap_or_else(|_| std::env::temp_dir().join("dsh-desktop"));
+        let mut st = settings::AppSettings::load(&data_dir);
+        st.dsh_home = home;
+        let node = kernel::resolve_node_path(&st, &exe_dir);
+        let code = match kernel::resolve_kernel_root(&st, &exe_dir) {
+            Ok(root) => match updater::smoke_kernel_with_patch(&node, &root, &exe_dir, &st) {
+                Ok(()) => {
+                    println!("MIRROR_SMOKE_OK");
+                    0
+                }
+                Err(e) => {
+                    println!("MIRROR_SMOKE_FAIL: {e}");
+                    1
+                }
+            },
+            Err(e) => {
+                println!("MIRROR_SMOKE_FAIL: kernel resolve: {e}");
+                1
+            }
+        };
+        std::process::exit(code);
     }
 
     // C：深链协议幂等注册（启动时）

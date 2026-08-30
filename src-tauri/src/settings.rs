@@ -30,6 +30,8 @@ pub struct AppSettings {
     pub boost_priority: bool,
     /// 低内存预警（F）：可用提交内存低于该 MB 值弹一次警告；0=关闭（默认 1536）
     pub memory_warn_mb: u64,
+    /// B（v0.2.1）：更新镜像冒烟就绪后的健康断言路由（逐条 GET 须 2xx）；空数组=跳过
+    pub health_routes: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -47,6 +49,7 @@ impl Default for AppSettings {
             node_options: "--max-old-space-size=4096".into(),
             boost_priority: true,
             memory_warn_mb: 1536,
+            health_routes: vec!["/plugin-manager/api/list".into()],
         }
     }
 }
@@ -69,5 +72,58 @@ impl AppSettings {
         let json = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::other(e))?;
         std::fs::write(&p, json)?;
         Ok(p)
+    }
+
+    /// 真实 DSH_HOME（A/C 共用）：settings.dsh_home 非空则用之，否则 %USERPROFILE%/.dsh（POSIX 退 HOME）
+    pub fn real_dsh_home(&self) -> PathBuf {
+        if !self.dsh_home.is_empty() {
+            return PathBuf::from(&self.dsh_home);
+        }
+        let base = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        Path::new(&base).join(".dsh")
+    }
+}
+
+/// B：health route 合法性（须以 / 开头且不含空白）；非法项由调用方跳过并告警
+pub fn valid_health_route(r: &str) -> bool {
+    r.starts_with('/') && !r.contains(char::is_whitespace)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_v021_fields() {
+        let s = AppSettings::default();
+        assert_eq!(s.health_routes, vec!["/plugin-manager/api/list".to_string()]);
+    }
+
+    #[test]
+    fn old_settings_json_backward_compatible() {
+        // v0.2.0 的 settings.json（无 v0.2.1 新字段）必须能反序列化并落默认值
+        let old = r#"{"update_channel":"latest","auto_check_update":true,"port_mode":"auto","dsh_home":"","telemetry_disabled":true,"keep_old_kernel":true,"node_path":"","kernel_path":"","hardware_acceleration":true,"node_options":"","boost_priority":true,"memory_warn_mb":1536}"#;
+        let s: AppSettings = serde_json::from_str(old).expect("old settings must parse");
+        assert_eq!(s.health_routes, vec!["/plugin-manager/api/list".to_string()]);
+    }
+
+    #[test]
+    fn health_route_validation() {
+        assert!(valid_health_route("/plugin-manager/api/list"));
+        assert!(valid_health_route("/health"));
+        assert!(!valid_health_route(""));
+        assert!(!valid_health_route("health"));
+        assert!(!valid_health_route("/a b"));
+        assert!(!valid_health_route("http://x/y"));
+    }
+
+    #[test]
+    fn real_dsh_home_prefers_override() {
+        let s = AppSettings { dsh_home: "X:/mirror-home".into(), ..Default::default() };
+        assert_eq!(s.real_dsh_home(), PathBuf::from("X:/mirror-home"));
+        let d = AppSettings::default().real_dsh_home();
+        assert!(d.ends_with(".dsh"));
     }
 }

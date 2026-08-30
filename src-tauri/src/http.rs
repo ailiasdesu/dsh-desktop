@@ -20,3 +20,21 @@ pub fn http_get(path: &str, port: u16, timeout: Duration) -> std::io::Result<Str
 pub fn is_ok(resp: &str) -> bool {
     resp.starts_with("HTTP/1.1") && resp.split(' ').nth(1) == Some("200")
 }
+
+/// 状态码解析（HTTP/1.x <code> …）
+pub fn status_code(resp: &str) -> Option<u16> {
+    if !resp.starts_with("HTTP/1.") {
+        return None;
+    }
+    resp.split(' ').nth(1)?.parse().ok()
+}
+
+/// 2xx 判定（B 健康断言）
+pub fn is_2xx(resp: &str) -> bool {
+    matches!(status_code(resp), Some(c) if (200..300).contains(&c))
+}
+
+/// 头体分离：返回 body（无空行分隔返回 None）
+pub fn body_of(resp: &str) -> Option<&str> {
+    resp.split_once("\r\n\r\n").map(|(_, b)| b)
+}

@@ -8,7 +8,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha512};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const REGISTRY_URL: &str = "https://registry.npmjs.org/@deepseek-ai/dsh";
@@ -170,18 +170,177 @@ pub fn smoke_kernel(node: &Path, kernel_new: &Path) -> std::io::Result<()> {
     }
 }
 
-/// D 破坏性更新保护：带桌面 patch 插件的完整冒烟。
-/// 临时 DSH_HOME + 临时 patch（指向现装 desktop/quit.js、health.js）→ spawn web --patch …
-/// → 30s 内解析就绪行 → GET /health 期望 200 → GET /quit → 等退出（≤10s）。
-/// 任一步失败 = 官方新版本与桌面集成插件不兼容（调用方清理 kernel.new 并提示回滚）。
+// ---------- v0.2.1 A/B：镜像 home 冒烟 + 插件健康断言 ----------
+
+/// A：更新冒烟失败签名（覆盖内核 bundle 解析失败与 Node 模块缺失的已知形态）
+const FAILURE_SIGNATURES: [&str; 4] = [
+    "cannot resolve profile bundle",
+    "ERR_MODULE_NOT_FOUND",
+    "Cannot find module",
+    "failed to load bundle",
+];
+
+/// A：失败签名匹配器（纯函数可单测）。命中返回错误摘要：
+/// 优先提取内核行 cannot resolve profile bundle "<插件名>" 的肇事插件名，其余签名带原始行。
+pub fn match_failure_signature(line: &str) -> Option<String> {
+    if !FAILURE_SIGNATURES.iter().any(|s| line.contains(s)) {
+        return None;
+    }
+    if let Some(i) = line.find("cannot resolve profile bundle ") {
+        let rest = line[i + "cannot resolve profile bundle ".len()..].trim_start_matches('"');
+        if let Some(end) = rest.find('"') {
+            return Some(format!("插件「{}」无法解析 | {}", &rest[..end], line.trim()));
+        }
+    }
+    Some(line.trim().to_string())
+}
+
+/// Windows 目录联接（junction，无需管理员权限；mklink 是 cmd 内建须经 cmd /C）；
+/// 非 Windows 用符号链接等价实现。
+fn make_dir_link(link: &Path, target: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // mklink 会把正斜杠段当开关解析（C:/Users → 开关 /Users → 无效语法），
+        // 而 CLI/settings 来源的 DSH_HOME 常用正斜杠——必须归一化为反斜杠（v0.2.1 反例实测）
+        let link_s = link.to_string_lossy().replace('/', "\\");
+        let target_s = target.to_string_lossy().replace('/', "\\");
+        let out = Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link_s)
+            .arg(&target_s)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::other(format!(
+                "mklink /J failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
+}
+
+/// A：镜像 home——把真实 <home>/profiles/web 的 package.json（+cordis.patch.yml 若存在）复制到
+/// work 同路径，node_modules 做成指向真实目录的 junction（零拷贝），让更新前冒烟以用户真实
+/// 插件集启动（实测 24 bundles 可正常就绪）。返回 Ok(false)=真实 profile 不存在（退回纯隔离冒烟）。
+pub fn build_mirror_home(real_home: &Path, work: &Path) -> std::io::Result<bool> {
+    let src = real_home.join("profiles").join("web");
+    let src_pkg = src.join("package.json");
+    if !src_pkg.exists() {
+        return Ok(false);
+    }
+    let dst = work.join("profiles").join("web");
+    std::fs::create_dir_all(&dst)?;
+    std::fs::copy(&src_pkg, dst.join("package.json"))?;
+    let src_patch = src.join("cordis.patch.yml");
+    if src_patch.exists() {
+        std::fs::copy(&src_patch, dst.join("cordis.patch.yml"))?;
+    }
+    let src_nm = src.join("node_modules");
+    if src_nm.exists() {
+        make_dir_link(&dst.join("node_modules"), &src_nm)?;
+    }
+    Ok(true)
+}
+
+/// 【安全红线】镜像 home 清理：必须先 std::fs::remove_dir 摘除 node_modules junction
+/// （RemoveDirectoryW 对 reparse point 只删链接自身、绝不递归目标），再 remove_dir_all 其余树。
+/// 严禁对含 junction 的树直接 remove_dir_all——一旦顺链遍历会把用户真实
+/// ~/.dsh/profiles/web/node_modules（全部已装插件）整个删光。
+pub fn cleanup_mirror_home(work: &Path) {
+    let junction = work.join("profiles").join("web").join("node_modules");
+    let _ = std::fs::remove_dir(&junction);
+    let _ = std::fs::remove_dir_all(work);
+}
+
+/// B：尽力从 HTTP body 提取 JSON（Connection: close 直读 body 可能带 chunked 分块噪声——
+/// 直接 parse 失败时截取首个 {/[ 到末个 }/] 的切片再试；再失败返回 None，按规格不算错误）
+pub fn extract_json(body: &str) -> Option<Value> {
+    if let Ok(v) = serde_json::from_str::<Value>(body.trim()) {
+        return Some(v);
+    }
+    let start = body.find(['{', '['])?;
+    let end = body.rfind(['}', ']'])?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str(&body[start..=end]).ok()
+}
+
+/// B：递归扫描 plugin-manager list JSON，收集 exists/resolved 为 false 的条目名。
+/// 形状鲁棒：不假设顶层结构，凡对象含 exists=false 或 resolved=false 即取其 name/id/package/bundle。
+pub fn scan_unresolved_plugins(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Array(a) => a.iter().for_each(|x| scan_unresolved_plugins(x, out)),
+        Value::Object(m) => {
+            let bad = ["exists", "resolved"]
+                .iter()
+                .any(|k| m.get(*k).and_then(|x| x.as_bool()) == Some(false));
+            if bad {
+                let name = ["name", "id", "package", "bundle"]
+                    .iter()
+                    .find_map(|k| m.get(*k).and_then(|x| x.as_str()))
+                    .unwrap_or("<unnamed>");
+                out.push(name.to_string());
+            }
+            m.values().for_each(|x| scan_unresolved_plugins(x, out));
+        }
+        _ => {}
+    }
+}
+
+/// B：健康断言——就绪后逐条 GET（5s 超时）须 2xx；/plugin-manager/api/list 附加未解析条目检查
+fn assert_health_routes(port: u16, routes: &[String]) -> std::io::Result<()> {
+    for route in routes {
+        if !crate::settings::valid_health_route(route) {
+            eprintln!("[updater] skip invalid health route: {route:?}");
+            continue;
+        }
+        let resp = crate::http::http_get(route, port, Duration::from_secs(5)).unwrap_or_default();
+        if !crate::http::is_2xx(&resp) {
+            return Err(std::io::Error::other(format!(
+                "mirror smoke: 健康断言失败——GET {route} 非 2xx（{}）",
+                crate::http::status_code(&resp)
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "无响应".into())
+            )));
+        }
+        if route == "/plugin-manager/api/list" {
+            if let Some(json) = crate::http::body_of(&resp).and_then(extract_json) {
+                let mut bad = Vec::new();
+                scan_unresolved_plugins(&json, &mut bad);
+                if !bad.is_empty() {
+                    return Err(std::io::Error::other(format!(
+                        "mirror smoke: 插件清单存在未解析项（exists/resolved=false）：{}",
+                        bad.join(", ")
+                    )));
+                }
+            } // 解析失败按规格不算错（best-effort）
+        }
+    }
+    Ok(())
+}
+
+/// D+A+B 破坏性更新保护（v0.2.1 加固）：镜像真实 profile 的完整冒烟。
+/// 镜像 home（真实 package.json/cordis.patch.yml + node_modules junction）→
+/// spawn web --patch <desktop> --no-open --port 0（stdout+stderr 双捕获）→ 45s 内就绪且
+/// 无失败签名 → GET /health 200 → B 健康断言（health_routes 全 2xx + 未解析插件检查）→
+/// /quit 优雅退出。任一步失败 = 新内核会破坏用户现有插件（调用方拒绝换版并清理 kernel.new）。
+/// 真实 profile 不存在时退回 v0.2 纯隔离语义（仅桌面 patch 插件，跳过 B 断言）。
 pub fn smoke_kernel_with_patch(
     node: &Path,
     kernel_new: &Path,
     exe_dir: &Path,
+    settings: &crate::settings::AppSettings,
 ) -> std::io::Result<()> {
-    use std::io::{BufRead, BufReader};
-    use std::sync::mpsc;
-
     let root = crate::kernel::repo_root(exe_dir);
     let quit_js = root.join("desktop").join("quit.js");
     let health_js = root.join("desktop").join("health.js");
@@ -189,70 +348,190 @@ pub fn smoke_kernel_with_patch(
         return Err(std::io::Error::other("desktop/quit.js|health.js missing"));
     }
     let work = std::env::temp_dir().join(format!("dsh-upd-smoke-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&work);
+    if work.exists() {
+        // 上轮残留同名目录也必须按安全序清理（可能含 junction）
+        cleanup_mirror_home(&work);
+    }
+    std::fs::create_dir_all(&work)?;
+    let result = mirror_smoke_run(node, kernel_new, &quit_js, &health_js, &work, settings);
+    // 【安全红线】统一走 cleanup_mirror_home：先 remove_dir 摘 junction，再删树
+    cleanup_mirror_home(&work);
+    result
+}
+
+fn mirror_smoke_run(
+    node: &Path,
+    kernel_new: &Path,
+    quit_js: &Path,
+    health_js: &Path,
+    work: &Path,
+    settings: &crate::settings::AppSettings,
+) -> std::io::Result<()> {
+    use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
+
     let patch = work.join("smoke.patch.yml");
-    crate::kernel::write_patch(&patch, &quit_js, &health_js)?;
+    crate::kernel::write_patch(&patch, quit_js, health_js)?;
+    let mirrored = build_mirror_home(&settings.real_dsh_home(), work)?;
 
-    let smoke_settings = crate::settings::AppSettings {
-        dsh_home: work.display().to_string(),
-        telemetry_disabled: true,
-        node_options: String::new(),
-        ..Default::default()
-    };
-    let res = crate::kernel::Resolved {
-        node: node.to_path_buf(),
-        bin: kernel_new.join("lib").join("bin.js"),
-        patch: patch.clone(),
-        log: work.join("kernel.log"),
-    };
-    let mut child = crate::kernel::spawn_kernel(&res, &smoke_settings, "0".to_string(), Some(&patch))?;
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = Command::new(node);
+    cmd.arg(kernel_new.join("lib").join("bin.js"))
+        .arg("web")
+        .arg("--patch")
+        .arg(&patch) // launcher flags 必须先于应用 flags（契约 §10.1）
+        .arg("--no-open")
+        .arg("--port")
+        .arg("0")
+        .env("DSH_HOME", work)
+        .env("DSH_TELEMETRY_DISABLED", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd.spawn()?;
+    // 树级 Job（KILL_ON_JOB_CLOSE）：kill 只杀直接子进程，真实插件集可能派生孙进程——
+    // Job 随 _job 析构自动收树，防冒烟残留孤儿
+    #[cfg(windows)]
+    let _job = crate::jobobject::JobObject::new()
+        .and_then(|j| j.assign_child(&child).map(|_| j))
+        .ok();
 
-    let stdout = child.stdout.take();
-    let (tx, rx) = mpsc::channel::<u16>();
-    if let Some(out) = stdout {
+    enum Ev {
+        Ready(u16),
+        Fatal(String),
+        Line(String),
+    }
+    let (tx, rx) = mpsc::channel::<Ev>();
+    let spawn_reader = |out: Box<dyn std::io::Read + Send>, tx2: mpsc::Sender<Ev>| {
         std::thread::spawn(move || {
             let reader = BufReader::new(out);
-            for line in reader.lines() {
-                if let Ok(l) = line {
-                    if let Some(p) = crate::kernel::parse_port_from_line(&l) {
-                        let _ = tx.send(p);
-                        break;
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                if let Some(msg) = match_failure_signature(&line) {
+                    let _ = tx2.send(Ev::Fatal(msg));
+                } else if let Some(p) = crate::kernel::parse_port_from_line(&line) {
+                    let _ = tx2.send(Ev::Ready(p));
+                } else {
+                    let _ = tx2.send(Ev::Line(line));
                 }
             }
         });
+    };
+    if let Some(out) = child.stdout.take() {
+        spawn_reader(Box::new(out), tx.clone());
     }
-    let port = match rx.recv_timeout(Duration::from_secs(30)) {
-        Ok(p) => p,
-        Err(_) => {
+    if let Some(err) = child.stderr.take() {
+        spawn_reader(Box::new(err), tx.clone());
+    }
+    drop(tx);
+
+    // 就绪等待 45s（镜像模式带真实 24 插件比空 home 慢）；失败签名/早退/超时 → Err（带肇事行）
+    let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let push_tail = |t: &mut std::collections::VecDeque<String>, l: String| {
+        if t.len() >= 20 {
+            t.pop_front();
+        }
+        t.push_back(l);
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(45);
+    let port: u16 = loop {
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(Ev::Ready(p)) => break p,
+            Ok(Ev::Fatal(msg)) => {
+                let _ = child.kill();
+                // Fatal 择优（反例实测）：首个签名行可能是 Node 栈帧回显的源码模板行
+                // （throw new Error(`…cannot resolve profile bundle ${JSON.stringify(packageName)}…`)，
+                // 不含实际插件名）；短暂排干后续输出，优先取提取到插件名（「插件「」标记）的渲染行。
+                let mut best = msg;
+                if !best.contains("插件「") {
+                    let until = std::time::Instant::now() + Duration::from_millis(800);
+                    while std::time::Instant::now() < until {
+                        match rx.try_recv() {
+                            Ok(Ev::Fatal(m)) => {
+                                if m.contains("插件「") {
+                                    best = m;
+                                    break;
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(_) => std::thread::sleep(Duration::from_millis(40)),
+                        }
+                    }
+                }
+                return Err(std::io::Error::other(format!("mirror smoke: {best}")));
+            }
+            Ok(Ev::Line(l)) => push_tail(&mut tail, l),
+            Err(_) => {}
+        }
+        if let Ok(Some(st)) = child.try_wait() {
+            // 早退：给读线程 500ms 排干缓冲，Fatal 择优（优先带插件名的渲染行，栈帧模板行兜底）
+            let drain_until = std::time::Instant::now() + Duration::from_millis(500);
+            let mut first_fatal: Option<String> = None;
+            while std::time::Instant::now() < drain_until {
+                match rx.try_recv() {
+                    Ok(Ev::Fatal(msg)) => {
+                        if msg.contains("插件「") {
+                            return Err(std::io::Error::other(format!("mirror smoke: {msg}")));
+                        }
+                        first_fatal.get_or_insert(msg);
+                    }
+                    Ok(Ev::Line(l)) => push_tail(&mut tail, l),
+                    Ok(Ev::Ready(_)) => {}
+                    Err(_) => std::thread::sleep(Duration::from_millis(30)),
+                }
+            }
+            if let Some(msg) = first_fatal {
+                return Err(std::io::Error::other(format!("mirror smoke: {msg}")));
+            }
+            return Err(std::io::Error::other(format!(
+                "mirror smoke: kernel exited before ready ({st}); last output: {}",
+                tail.iter().rev().take(5).rev().cloned().collect::<Vec<_>>().join(" | ")
+            )));
+        }
+        if std::time::Instant::now() >= deadline {
             let _ = child.kill();
-            let _ = std::fs::remove_dir_all(&work);
-            return Err(std::io::Error::other("with-patch smoke: ready timeout"));
+            return Err(std::io::Error::other(format!(
+                "mirror smoke: ready timeout (45s); last output: {}",
+                tail.iter().rev().take(5).rev().cloned().collect::<Vec<_>>().join(" | ")
+            )));
         }
     };
+
+    // 桌面集成自检（v0.2 语义保留）：/health 必须 200
     let health = crate::http::http_get("/health", port, Duration::from_secs(3)).unwrap_or_default();
     if !crate::http::is_ok(&health) {
         let _ = child.kill();
-        let _ = std::fs::remove_dir_all(&work);
-        return Err(std::io::Error::other("with-patch smoke: /health not 200"));
+        return Err(std::io::Error::other("mirror smoke: /health not 200"));
     }
+
+    // B：插件健康断言（仅镜像模式——隔离 home 没有用户插件，断言无意义）；空数组=跳过
+    if mirrored {
+        if let Err(e) = assert_health_routes(port, &settings.health_routes) {
+            let _ = child.kill();
+            return Err(e);
+        }
+    }
+
     let _ = crate::http::http_get("/quit", port, Duration::from_secs(3));
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    // 正例实测：真实插件集（24 bundles）析构可超过 10s——冒烟目标（插件可加载+健康断言）
+    // 此刻已全部达成，优雅退出超时不判失败：20s 宽限后树杀兜底并告警。
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
+                    eprintln!("[updater] mirror smoke: quit timeout (20s), tree-kill fallback");
                     let _ = child.kill();
-                    let _ = std::fs::remove_dir_all(&work);
-                    return Err(std::io::Error::other("with-patch smoke: quit timeout"));
+                    break;
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(_) => break,
         }
     }
-    let _ = std::fs::remove_dir_all(&work);
     Ok(())
 }
 
@@ -312,6 +591,7 @@ pub fn prepare_new_kernel(
     node: &Path,
     kernel_root: &Path,
     exe_dir: &Path,
+    settings: &crate::settings::AppSettings,
 ) -> std::io::Result<PathBuf> {
     let install = kernel_root.parent().unwrap_or(Path::new("."));
     let tgz = install.join(".update_download.tgz");
@@ -338,11 +618,11 @@ pub fn prepare_new_kernel(
     let _ = std::fs::remove_file(&tgz);
 
     smoke_kernel(node, &kernel_new)?;
-    // D：带桌面插件冒烟——不兼容则宁可不换版本
-    if let Err(e) = smoke_kernel_with_patch(node, &kernel_new, exe_dir) {
+    // D+A/B：镜像 home 冒烟（真实插件集+健康断言）——不兼容则宁可不换版本
+    if let Err(e) = smoke_kernel_with_patch(node, &kernel_new, exe_dir, settings) {
         let _ = std::fs::remove_dir_all(&kernel_new);
         return Err(std::io::Error::other(format!(
-            "官方新版本与桌面集成插件不兼容，已保留当前版本（{e}）"
+            "官方新版本与现有插件/桌面集成不兼容，已保留当前版本（{e}）"
         )));
     }
     Ok(kernel_new)
@@ -353,6 +633,7 @@ pub fn run_update_flow(
     kernel_root: &Path,
     node: &Path,
     exe_dir: &Path,
+    settings: &crate::settings::AppSettings,
     on_question: impl FnOnce(&str) -> bool,
 ) -> (String, Option<(PathBuf, String)>) {
     match check_latest(kernel_root) {
@@ -366,7 +647,7 @@ pub fn run_update_flow(
             if !on_question(&ask) {
                 return ("已取消".to_string(), None);
             }
-            match prepare_new_kernel(&info, node, kernel_root, exe_dir) {
+            match prepare_new_kernel(&info, node, kernel_root, exe_dir, settings) {
                 Ok(knew) => (
                     format!("新版本 {} 已准备，正在重启内核…", info.version),
                     Some((knew, info.version)),
@@ -401,5 +682,97 @@ mod tests {
     fn check_latest_none_on_network_fail() {
         let r = check_latest(Path::new("X:/nonexistent-kernel"));
         assert!(r.is_none());
+    }
+
+    #[test]
+    fn failure_signature_matcher() {
+        // 内核实测原文形态：肇事插件名必须被提取进错误摘要
+        let l = r#"dsh: cannot resolve profile bundle "@x/y" from the dsh installation or C:/Users/u/.dsh/profiles/web; run 'dsh plugin --profile web install' to fetch it"#;
+        let m = match_failure_signature(l).expect("must match");
+        assert!(m.contains("@x/y"), "must name the culprit bundle: {m}");
+        assert!(m.contains("cannot resolve profile bundle"), "must keep raw line: {m}");
+        // 其余三类签名
+        assert!(match_failure_signature("Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'foo'").is_some());
+        assert!(match_failure_signature("Error: Cannot find module 'bar'").is_some());
+        assert!(match_failure_signature("plugin host: failed to load bundle xyz").is_some());
+        // 阴性：就绪行与普通日志不得误报
+        assert!(match_failure_signature("dsh web: http://127.0.0.1:8369").is_none());
+        assert!(match_failure_signature("normal log line").is_none());
+    }
+
+    #[test]
+    fn unresolved_plugin_scan() {
+        let j: Value = serde_json::from_str(
+            r#"{"plugins":[{"name":"a","exists":true,"resolved":true},{"name":"bad-one","exists":false},{"id":"bad-two","resolved":false},{"name":"c"}]}"#,
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        scan_unresolved_plugins(&j, &mut out);
+        assert_eq!(out, vec!["bad-one".to_string(), "bad-two".to_string()]);
+    }
+
+    #[test]
+    fn json_extraction_best_effort() {
+        assert!(extract_json(r#"{"a":1}"#).is_some());
+        // chunked 噪声：前后杂质仍可提取
+        assert!(extract_json(r#"7f garbage {"a":[1,2]} trailing 0"#).is_some());
+        assert!(extract_json("plain text").is_none());
+    }
+
+    #[test]
+    fn mirror_home_build_and_safe_cleanup() {
+        let base = std::env::temp_dir().join(format!("dsh-mirror-ut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let work = base.join("work");
+        let real_nm = real
+            .join("profiles")
+            .join("web")
+            .join("node_modules")
+            .join("@scope")
+            .join("pkg");
+        std::fs::create_dir_all(&real_nm).unwrap();
+        std::fs::write(real_nm.join("index.js"), "ok").unwrap();
+        std::fs::write(real.join("profiles").join("web").join("package.json"), "{}").unwrap();
+        std::fs::write(real.join("profiles").join("web").join("cordis.patch.yml"), "x: 1").unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+
+        assert!(build_mirror_home(&real, &work).unwrap());
+        let wnm = work.join("profiles").join("web").join("node_modules");
+        // junction 生效：透过链接可见真实文件（核验路径必须带完整 @scope 段）
+        assert!(wnm.join("@scope").join("pkg").join("index.js").exists());
+        assert!(work.join("profiles").join("web").join("package.json").exists());
+        assert!(work.join("profiles").join("web").join("cordis.patch.yml").exists());
+
+        cleanup_mirror_home(&work);
+        assert!(!work.exists(), "work tree must be fully removed");
+        // 【安全红线验证】真实 node_modules 必须毫发无损
+        assert!(real_nm.join("index.js").exists(), "real node_modules must survive cleanup");
+
+        // 回归：正斜杠形态的 real_home（CLI/settings 来源）也必须能建 junction
+        // （mklink 把 /x 段当开关解析，未归一化时报「无效语法」）
+        let real_fwd = PathBuf::from(real.to_string_lossy().replace('\\', "/"));
+        let work_fwd = base.join("work-fwd");
+        std::fs::create_dir_all(&work_fwd).unwrap();
+        assert!(build_mirror_home(&real_fwd, &work_fwd).unwrap());
+        assert!(work_fwd
+            .join("profiles").join("web").join("node_modules")
+            .join("@scope").join("pkg").join("index.js")
+            .exists());
+        cleanup_mirror_home(&work_fwd);
+        assert!(real_nm.join("index.js").exists(), "real node_modules must survive fwd-slash cleanup");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn mirror_home_absent_profile_falls_back() {
+        let base = std::env::temp_dir().join(format!("dsh-mirror-ut2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real-empty");
+        let work = base.join("work2");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        assert!(!build_mirror_home(&real, &work).unwrap());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
