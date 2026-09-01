@@ -36,6 +36,9 @@ pub struct AppSettings {
     pub safe_mode: bool,
     /// C（v0.2.1）：安全模式 profile 名（<DSH_HOME>/profiles/<safe_profile>），缺省 dsh-safe
     pub safe_profile: String,
+    /// 桌面源方案：WebView 导航 http://dsh.localhost:<port>/（内核 cordis.patch.yml 须声明
+    /// client-connection trustedHosts: [dsh.localhost]）；false 回退传统 http://127.0.0.1:<port>/
+    pub use_app_hostname: bool,
 }
 
 impl Default for AppSettings {
@@ -56,6 +59,7 @@ impl Default for AppSettings {
             health_routes: vec!["/plugin-manager/api/list".into()],
             safe_mode: false,
             safe_profile: "dsh-safe".into(),
+            use_app_hostname: true,
         }
     }
 }
@@ -107,6 +111,7 @@ mod tests {
         assert_eq!(s.health_routes, vec!["/plugin-manager/api/list".to_string()]);
         assert!(!s.safe_mode);
         assert_eq!(s.safe_profile, "dsh-safe");
+        assert!(s.use_app_hostname);
     }
 
     #[test]

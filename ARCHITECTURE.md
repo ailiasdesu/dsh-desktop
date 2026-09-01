@@ -206,7 +206,7 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
 
 ### 5.1 事实底座（实测）
 
-- 内核版本 = npm 包版本：https://registry.npmjs.org/@deepseek-ai/dsh → dist-tags:{"latest":"0.1.1-rc.2","next":"0.1.1-rc.2"}；**无 engines 字段**（Node 下限自理，捆绑 ≥22、推荐 24 LTS 系）。
+- 内核包版本 = 0.1.1-rc.2；DSH_HOME 下 `cordis.patch.yml` 的 `session-query-sqlite` 行已改由 `session-rust.exe prefill` 预填充索引（绕开官方 Node 多帧解码崩溃路径，revision 与 Node bigint stat 逐字节一致）；每次内核更新/会话文件变动后需重跑 prefill 增量以保持索引同步
 - **用户数据与内核版本解耦**：DSH_HOME 下 profiles/sessions/storages 与安装位置无关；每次启动内核自动 healProfilesModuleFallback()（按当前安装重建 profiles/node_modules 平面符号链接闭包）+ normalizeShippedProfile()（bundles 规范化回官方元组）——**换内核 = 替换包目录，数据零迁移**。这就是「跟随官方更新」的机制底座。
 
 ### 5.2 更新流程（updater.rs）
@@ -294,6 +294,7 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
   "keepOldKernel": true,            // 更新后保留 kernel.old 用于回滚
   "nodePath": "",                   // 空=使用捆绑 runtime/node.exe
   "kernelPath": ""                  // 空=使用安装目录 kernel/
+  "useAppHostname": true            // 桌面源方案：导航 http://dsh.localhost:<port>/（spawn 附 --trusted-host dsh.localhost）；false 回退 http://127.0.0.1:<port>/
 }
 ```
 
@@ -374,3 +375,4 @@ Running → (更新) → Stopping → [替换 kernel] → Starting → Running
 2. **安装包体积**：内核 260MB 裁剪到 180–210MB 的收益与风险（预编译 binary 依赖校验）→ M1 用真实产物实测并回填 §8 指标。
 3. **多版本并存的边界**：同一 ~/.dsh 下旧内核（rc.2）与新内核连跑——profile 自愈按新安装闭包重建链接，旧版若依赖已被移除的包需实测；INSTALLATION_OWNED_PROFILE_TUPLES 保证 bundles 规范化，属低风险，列入 M2 验收用例。
 4. **更新时活动会话**：内核重启 = 服务重启；sessions 持久化在 DSH_HOME（重启后会话列表恢复），但进行中的对话会中断 → UX 上更新前提示「正在更新，将重启内核」。
+5. **会话搜索的 Rust 预填充**：官方 `session-query-sqlite` 在真实数据（301MB / 44 会话 / 多帧 zstd）上首次索引原生层硬崩（两次复现）。已通过 `session-rust.exe prefill` 按 schema v8 直接写库（revision 与 Node bigint stat 逐字节一致）绕开——索引正确性已验证（`session.search` RPC 200 + 中文召回），但**增量同步需手动触发 prefill**（文件变动后不会自动重建）。后续可扩展为 sidecar daemon 监听会话目录变更。

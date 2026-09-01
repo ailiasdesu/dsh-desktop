@@ -86,6 +86,17 @@ pub fn parse_port_from_line(line: &str) -> Option<u16> {
     }
 }
 
+/// WebView 导航源（桌面源方案）：use_app_hostname 时用 dsh.localhost
+/// （Chromium/WebView2 内建把 *.localhost 映射到环回；内核侧 client-connection
+/// 的 trustedHosts 须声明 dsh.localhost，/api 浏览器信任围栏按 Host+Origin 同权放行）。
+/// false 回退传统 127.0.0.1（内核不需要补丁声明也能跑）。
+pub const APP_HOSTNAME: &str = "dsh.localhost";
+
+pub fn webview_url(port: u16, use_app_hostname: bool) -> String {
+    let host = if use_app_hostname { APP_HOSTNAME } else { "127.0.0.1" };
+    format!("http://{host}:{port}/")
+}
+
 #[derive(Debug)]
 pub struct Resolved {
     pub node: PathBuf,
@@ -283,7 +294,14 @@ pub fn spawn_kernel(
     if let Some(p) = patch {
         cmd.arg("--patch").arg(p); // ⚠ launcher flags 必须先于应用 flags（契约 §10.1）
     }
-    cmd.arg("--no-open").arg("--port").arg(&port_arg).stdout(Stdio::piped());
+    cmd.arg("--no-open").arg("--port").arg(&port_arg);
+    // 桌面源方案：WebView 走 http://dsh.localhost:<port>/，须经官方 --trusted-host
+    // 旗标向 /api 浏览器信任围栏声明该权威（无端口条目=任意端口；随 webRuntime
+    // 表达式进入 connection 插件，安全模式/镜像冒烟各 profile 通吃）。
+    if settings.use_app_hostname {
+        cmd.arg("--trusted-host").arg(APP_HOSTNAME);
+    }
+    cmd.stdout(Stdio::piped());
 
     if let Some(parent) = res.log.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -629,7 +647,7 @@ fn launch_once(
     }
 
     // 创建/导航窗口（主线程调度）
-    let url = format!("http://127.0.0.1:{port}/");
+    let url = webview_url(port, settings.use_app_hostname);
     show_or_redirect(app, &url);
 
     // 阶段 2：运行中监测（停止请求 / 更新重启请求 / 崩溃检测 / F 低内存看门狗）
@@ -769,6 +787,13 @@ mod tests {
         assert_eq!(parse_port_from_line("nothing here"), None);
         assert_eq!(parse_port_from_line(""), None);
         assert_eq!(parse_port_from_line("dsh web: http://127.0.0.1:"), None);
+    }
+
+    #[test]
+    fn webview_url_modes() {
+        assert_eq!(webview_url(3379, true), "http://dsh.localhost:3379/");
+        assert_eq!(webview_url(0, true), "http://dsh.localhost:0/");
+        assert_eq!(webview_url(3379, false), "http://127.0.0.1:3379/");
     }
 
     #[test]
