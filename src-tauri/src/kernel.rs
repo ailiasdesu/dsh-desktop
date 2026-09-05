@@ -26,11 +26,11 @@ const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(5)];
 const FIXED_PORT_PREFIX: &str = "fixed:";
 
 pub enum KernelEvent {
-    Ready(u16),
+    Ready(u16, Option<String>),
     Line(String),
 }
 
-/// 就绪行契约：dsh web: http://127.0.0.1:<port>
+/// 就绪行契约：dsh web: http://127.0.0.1:<port>[/…][?query]
 /// 低内存滞回状态机（F 纯函数，可单测）：
 /// 参数：mem_mb=当前可用提交内存(MB)；warn_mb=预警阈值(0=关)；reset_mb=恢复阈值(滞回)；warned=当前是否已弹过。
 /// 返回：(should_warn, next_warned)——should_warn=本次是否弹；next_warned=下一状态。
@@ -95,6 +95,27 @@ pub const APP_HOSTNAME: &str = "dsh.localhost";
 pub fn webview_url(port: u16, use_app_hostname: bool) -> String {
     let host = if use_app_hostname { APP_HOSTNAME } else { "127.0.0.1" };
     format!("http://{host}:{port}/")
+}
+
+/// 提取就绪行里的完整 URL（含 `?token=`）。内核 0.1.2 起浏览器认证强制：
+/// 索引请求须凭 URL 里的进程 launch token 换取签名 cookie，裸开 `/` 一律 401。
+pub fn parse_ready_url(line: &str) -> Option<String> {
+    let i = line.find("http://127.0.0.1:")?;
+    parse_port_from_line(line)?;
+    let tail = &line[i..];
+    let end = tail.find([' ', '\t', '\r']).unwrap_or(tail.len());
+    Some(tail[..end].to_string())
+}
+
+/// 用就绪 URL 组 WebView 导航源：保留查询串（token 随进程刷新，重启后须换新），
+/// 按 use_app_hostname 换主机名（token 换 cookie 不绑主机名，cookie 才绑定 authority）。
+pub fn webview_url_with_token(ready_url: &str, port: u16, use_app_hostname: bool) -> String {
+    let query = match ready_url.find('?') {
+        Some(i) => &ready_url[i..],
+        None => "",
+    };
+    let host = if use_app_hostname { APP_HOSTNAME } else { "127.0.0.1" };
+    format!("http://{host}:{port}/{query}")
 }
 
 #[derive(Debug)]
@@ -562,7 +583,7 @@ fn launch_once(
                     Ok(l) => {
                         let _ = tx.send(KernelEvent::Line(l.clone()));
                         if let Some(p) = parse_port_from_line(&l) {
-                            let _ = tx.send(KernelEvent::Ready(p));
+                            let _ = tx.send(KernelEvent::Ready(p, parse_ready_url(&l)));
                         }
                     }
                     Err(_) => break,
@@ -574,14 +595,16 @@ fn launch_once(
     // 阶段 1：等就绪（≤30s，期间响应停止请求/早退）
     let deadline = Instant::now() + READY_TIMEOUT;
     let mut port: Option<u16> = None;
+    let mut ready_url: Option<String> = None;
     loop {
         if ctl.stop.load(Ordering::SeqCst) {
             graceful_stop(&mut child, job.as_ref(), None, degraded);
             return LaunchOutcome::Stopped;
         }
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(KernelEvent::Ready(p)) => {
+            Ok(KernelEvent::Ready(p, u)) => {
                 port = Some(p);
+                ready_url = u;
                 break;
             }
             Ok(KernelEvent::Line(l)) => eprintln!("[kernel] {l}"),
@@ -646,8 +669,12 @@ fn launch_once(
         return LaunchOutcome::Stopped;
     }
 
-    // 创建/导航窗口（主线程调度）
-    let url = webview_url(port, settings.use_app_hostname);
+    // 创建/导航窗口（主线程调度）——优先用内核就绪行的完整 URL（带 ?token=，
+    // 0.1.2 起浏览器认证强制；token 每次启动刷新，重启后随新就绪行换新）。
+    let url = match ready_url.as_deref() {
+        Some(u) => webview_url_with_token(u, port, settings.use_app_hostname),
+        None => webview_url(port, settings.use_app_hostname),
+    };
     show_or_redirect(app, &url);
 
     // 阶段 2：运行中监测（停止请求 / 更新重启请求 / 崩溃检测 / F 低内存看门狗）
@@ -735,11 +762,15 @@ fn show_or_redirect(app: &tauri::AppHandle, url: &str) {
     let _ = app.run_on_main_thread(move || {
         let ok = match app2.get_webview_window("main") {
             Some(w) => {
-                let js = format!(
-                    "window.location.href = {};",
-                    serde_json::to_string(&u).unwrap_or_else(|_| "\"\"".into())
-                );
-                w.eval(&js).is_ok()
+                // 不能用 window.location.href：loading 页（tauri 内部 origin）发起的
+                // 跨 scheme 导航会把内核 SameSite=Strict 的认证 cookie 以
+                // SchemefulSameSiteStrict 拦截——token 换到的 cookie 永远送不到
+                // 303 后的 GET /（401 循环）。navigate() 是 WebView 层导航，
+                // 无页面发起方，Strict cookie 照常发送。
+                match tauri::Url::parse(&u) {
+                    Ok(nu) => w.navigate(nu).is_ok(),
+                    Err(_) => false,
+                }
             }
             None => {
                 tauri::WebviewWindowBuilder::new(
@@ -794,6 +825,34 @@ mod tests {
         assert_eq!(webview_url(3379, true), "http://dsh.localhost:3379/");
         assert_eq!(webview_url(0, true), "http://dsh.localhost:0/");
         assert_eq!(webview_url(3379, false), "http://127.0.0.1:3379/");
+    }
+
+    #[test]
+    fn parse_ready_url_extracts_token() {
+        // 0.1.2 起就绪行带 ?token=（认证强制）
+        assert_eq!(
+            parse_ready_url("dsh web: http://127.0.0.1:2085/?token=abc-_123. xyz"),
+            Some("http://127.0.0.1:2085/?token=abc-_123.".to_string())
+        );
+        // 旧内核就绪行无 token：URL 原样保留
+        assert_eq!(
+            parse_ready_url("dsh web: http://127.0.0.1:2085"),
+            Some("http://127.0.0.1:2085".to_string())
+        );
+        assert_eq!(parse_ready_url("nothing here"), None);
+        assert_eq!(parse_ready_url("dsh web: http://127.0.0.1:"), None);
+    }
+
+    #[test]
+    fn webview_url_with_token_preserves_query() {
+        assert_eq!(
+            webview_url_with_token("http://127.0.0.1:2085/?token=abc", 2085, true),
+            "http://dsh.localhost:2085/?token=abc"
+        );
+        assert_eq!(
+            webview_url_with_token("http://127.0.0.1:2085", 2085, false),
+            "http://127.0.0.1:2085/"
+        );
     }
 
     #[test]

@@ -535,6 +535,22 @@ fn mirror_smoke_run(
     Ok(())
 }
 
+/// 递归复制目录（config/ 回填用；caller 保证 src/dst 均存在且 dst 不存在）。
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// 原子替换：kernel → kernel.old，kernel.new → kernel；验证 lib/bin.js+version；失败自动回退
 pub fn apply_swap(kernel_root: &Path, new_version: &str) -> std::io::Result<()> {
     let install = kernel_root.parent().unwrap_or(Path::new("."));
@@ -555,6 +571,17 @@ pub fn apply_swap(kernel_root: &Path, new_version: &str) -> std::io::Result<()> 
                 let _ = std::fs::rename(&kernel_old, kernel_root);
             }
             return Err(e);
+        }
+    }
+    // 官方 0.1.2 起 npm 包不再携带 config/（agent-presets 模板），换版后从上一版
+    // 内核回填，避免升级丢配置；回填失败不阻断换版（config 可由首次启动重建）。
+    let config_dir = kernel_root.join("config");
+    if !config_dir.exists() {
+        let old_config = kernel_old.join("config");
+        if old_config.exists() {
+            if let Err(e) = copy_dir_all(&old_config, &config_dir) {
+                eprintln!("[updater] config backfill failed (non-fatal): {e}");
+            }
         }
     }
     let ok = kernel_root.join("lib").join("bin.js").exists()
