@@ -261,6 +261,115 @@ pub fn cleanup_mirror_home(work: &Path) {
     let _ = std::fs::remove_dir_all(work);
 }
 
+// ---------- B³：junction 写穿防护（快照 → 冒烟 → 按快照修复） ----------
+//
+// 冒烟镜像用 junction 挂真实 node_modules，而内核的 profile 兜底物化
+// （healProfileModuleFallback）以 profile.dir 为根写 .dsh-module-fallback 符号链接：
+// DSH_HOME 指向冒烟树时，链接实体写进冒烟树、入口链接却经 junction 写进真实
+// node_modules——冒烟树随后被清理，真实 profile 顶层数十条链接全部悬空（实测 24 条）。
+// 对策：冒烟前递归快照（≤4 层），冒烟后按快照修复被改写的链接目标、清除指向冒烟树
+// 的非快照新链接。真实目录/文件不碰。
+
+fn smoke_path_marker(target: &str) -> bool {
+    target.contains("dsh-upd-smoke") || target.contains("dsh-desktop-update-smoke")
+}
+
+fn normalize_link_target(target: &str) -> String {
+    target.trim_start_matches(r"\\?\").replace('/', "\\")
+}
+
+fn snapshot_profile_tree(root: &Path, rel: &str, depth: u32, out: &mut Vec<(String, Option<String>)>) {
+    if depth > 4 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel_child = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}\\{name}")
+        };
+        match std::fs::read_link(entry.path()) {
+            Ok(target) => out.push((rel_child, Some(target.to_string_lossy().into_owned()))),
+            Err(_) => {
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                if is_dir {
+                    snapshot_profile_tree(&entry.path(), &rel_child, depth + 1, out);
+                    out.push((rel_child, None));
+                } else {
+                    out.push((rel_child, None));
+                }
+            }
+        }
+    }
+}
+
+/// 冒烟前快照真实 profile node_modules（相对路径 → 链接目标；None = 真实目录/文件）。
+fn snapshot_profile_entries(real_home: &Path) -> Vec<(String, Option<String>)> {
+    let nm = real_home.join("profiles").join("web").join("node_modules");
+    let mut out = Vec::new();
+    snapshot_profile_tree(&nm, "", 0, &mut out);
+    out
+}
+
+/// 冒烟后按快照修复：链接目标被改写（含冒烟树清理后的悬空）→ 摘除重建；
+/// 快照之外新增的指向冒烟树的链接 → 直接清除。真实目录/文件一律不碰。
+/// 返回修复条数（仅日志用）。
+fn repair_profile_entries(real_home: &Path, snapshot: &[(String, Option<String>)]) -> usize {
+    let nm = real_home.join("profiles").join("web").join("node_modules");
+    let snap: std::collections::HashSet<&str> = snapshot.iter().map(|(r, _)| r.as_str()).collect();
+    let mut fixed = 0usize;
+    for (rel, want) in snapshot {
+        let path = nm.join(rel.replace('\\', std::path::MAIN_SEPARATOR_STR));
+        let Some(want) = want else {
+            // 快照是真实目录/文件：仅当现场被换成指向冒烟树的链接时清除
+            if let Ok(cur) = std::fs::read_link(&path) {
+                let cur = cur.to_string_lossy();
+                if smoke_path_marker(&cur) {
+                    let _ = std::fs::remove_dir(&path);
+                    let _ = std::fs::remove_file(&path);
+                    fixed += 1;
+                }
+            }
+            continue;
+        };
+        let want_norm = normalize_link_target(want);
+        let matches = std::fs::read_link(&path)
+            .map(|cur| normalize_link_target(&cur.to_string_lossy()) == want_norm)
+            .unwrap_or(false);
+        if !matches {
+            let _ = std::fs::remove_dir(&path);
+            let _ = std::fs::remove_file(&path);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if make_dir_link(&path, Path::new(&want_norm)).is_ok() {
+                fixed += 1;
+            }
+        }
+    }
+    // 清除快照之外新增的冒烟树链接（heal 可能创建了快照里没有的包条目）
+    let mut fresh = Vec::new();
+    snapshot_profile_tree(&nm, "", 0, &mut fresh);
+    for (rel, link) in fresh {
+        if snap.contains(rel.as_str()) {
+            continue;
+        }
+        if let Some(target) = link {
+            if smoke_path_marker(&target) {
+                let path = nm.join(rel.replace('\\', std::path::MAIN_SEPARATOR_STR));
+                let _ = std::fs::remove_dir(&path);
+                let _ = std::fs::remove_file(&path);
+                fixed += 1;
+            }
+        }
+    }
+    fixed
+}
+
 /// B：尽力从 HTTP body 提取 JSON（Connection: close 直读 body 可能带 chunked 分块噪声——
 /// 直接 parse 失败时截取首个 {/[ 到末个 }/] 的切片再试；再失败返回 None，按规格不算错误）
 pub fn extract_json(body: &str) -> Option<Value> {
@@ -353,9 +462,16 @@ pub fn smoke_kernel_with_patch(
         cleanup_mirror_home(&work);
     }
     std::fs::create_dir_all(&work)?;
+    // B³：镜像 junction 会让内核的兜底物化写穿到真实 profile（冒烟树清理后链接
+    // 全部悬空）——冒烟前递归快照，冒烟后按快照修复
+    let snapshot = snapshot_profile_entries(&settings.real_dsh_home());
     let result = mirror_smoke_run(node, kernel_new, &quit_js, &health_js, &work, settings);
     // 【安全红线】统一走 cleanup_mirror_home：先 remove_dir 摘 junction，再删树
     cleanup_mirror_home(&work);
+    let fixed = repair_profile_entries(&settings.real_dsh_home(), &snapshot);
+    if fixed > 0 {
+        eprintln!("[updater] smoke 后按快照修复真实 profile 链接 {fixed} 条");
+    }
     result
 }
 
@@ -551,6 +667,33 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Windows 上内核进程树刚退出的短窗口内，杀毒/索引/插件派生的工作进程仍可能
+/// 短暂持有 kernel/ 目录句柄，rename 报 os error 5（拒绝访问）——重试消化瞬态锁，
+/// 不再让一次可自愈的争用演变成「换版失败 + 回滚失败 + 三目录全丢」。
+fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    const ATTEMPTS: usize = 8;
+    const WAIT_MS: u64 = 400;
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0..ATTEMPTS {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && attempt + 1 < ATTEMPTS => {
+                eprintln!(
+                    "[updater] rename 拒绝访问（第 {} 次），{}ms 后重试: {} -> {}",
+                    attempt + 1,
+                    WAIT_MS,
+                    from.display(),
+                    to.display()
+                );
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(WAIT_MS));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("rename failed")))
+}
+
 /// 原子替换：kernel → kernel.old，kernel.new → kernel；验证 lib/bin.js+version；失败自动回退
 pub fn apply_swap(kernel_root: &Path, new_version: &str) -> std::io::Result<()> {
     let install = kernel_root.parent().unwrap_or(Path::new("."));
@@ -561,14 +704,20 @@ pub fn apply_swap(kernel_root: &Path, new_version: &str) -> std::io::Result<()> 
         if kernel_old.exists() {
             let _ = std::fs::remove_dir_all(&kernel_old);
         }
-        std::fs::rename(kernel_root, &kernel_old)?;
+        rename_retry(kernel_root, &kernel_old)?;
         swapped = true;
     }
     match std::fs::rename(&kernel_new, kernel_root) {
         Ok(()) => {}
         Err(e) => {
             if swapped {
-                let _ = std::fs::rename(&kernel_old, kernel_root);
+                if let Err(re) = rename_retry(&kernel_old, kernel_root) {
+                    // 回滚失败绝不能静默——三目录全丢的事故源头
+                    eprintln!("[updater] 回滚 rename 也失败: {re}");
+                    return Err(std::io::Error::other(format!(
+                        "swap failed: {e}; rollback failed: {re} — 旧版完整保留在 kernel.old，请手动将 kernel.old 改名为 kernel"
+                    )));
+                }
             }
             return Err(e);
         }
@@ -587,7 +736,9 @@ pub fn apply_swap(kernel_root: &Path, new_version: &str) -> std::io::Result<()> 
     let ok = kernel_root.join("lib").join("bin.js").exists()
         && current_version(kernel_root).as_deref() == Some(new_version);
     if !ok {
-        let _ = rollback(kernel_root, true);
+        if let Err(re) = rollback(kernel_root, true) {
+            eprintln!("[updater] post-swap 验证失败的回滚也失败: {re}");
+        }
         return Err(std::io::Error::other("post-swap verification failed"));
     }
     Ok(())
@@ -600,10 +751,10 @@ pub fn rollback(kernel_root: &Path, keep_bad: bool) -> std::io::Result<()> {
     let kernel_old = install.join("kernel.old");
     let _ = std::fs::remove_dir_all(&kernel_bad);
     if kernel_root.exists() {
-        std::fs::rename(kernel_root, &kernel_bad)?;
+        rename_retry(kernel_root, &kernel_bad)?;
     }
     if kernel_old.exists() {
-        std::fs::rename(&kernel_old, kernel_root)?;
+        rename_retry(&kernel_old, kernel_root)?;
     }
     if !keep_bad {
         let _ = std::fs::remove_dir_all(&kernel_bad);
@@ -800,6 +951,63 @@ mod tests {
         std::fs::create_dir_all(&real).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         assert!(!build_mirror_home(&real, &work).unwrap());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn repair_profile_entries_restores_smoke_rewrites() {
+        let base = std::env::temp_dir().join(format!("dsh-repair-ut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let nm = real.join("profiles").join("web").join("node_modules");
+        // 顶层的真实目录 + 链接；@scope 内的链接（heal 写穿的典型深度）
+        let elsewhere = base.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::create_dir_all(nm.join("real-dir")).unwrap();
+        make_dir_link(&nm.join("linked"), &elsewhere).unwrap();
+        let scoped_parent = nm.join("@scope").join("pkg-a");
+        std::fs::create_dir_all(&scoped_parent).unwrap();
+        let scoped_target = base.join("scoped-target");
+        std::fs::create_dir_all(&scoped_target).unwrap();
+        make_dir_link(&scoped_parent.join("dep"), &scoped_target).unwrap();
+
+        let snapshot = snapshot_profile_entries(&real);
+        assert_eq!(snapshot.len(), 5, "real-dir/linked/@scope/pkg-a/dep + 中间目录");
+
+        // 模拟 heal 写穿：两条链接改指冒烟树（随后冒烟树被清 → 悬空）
+        let smoke_fb = base.join("dsh-upd-smoke-x").join("fb");
+        std::fs::create_dir_all(&smoke_fb).unwrap();
+        std::fs::remove_dir(nm.join("linked")).unwrap();
+        make_dir_link(&nm.join("linked"), &smoke_fb).unwrap();
+        std::fs::remove_dir(scoped_parent.join("dep")).unwrap();
+        make_dir_link(&scoped_parent.join("dep"), &smoke_fb).unwrap();
+        // heal 新建的快照外条目也指向冒烟树
+        make_dir_link(&nm.join("fresh-pkg"), &smoke_fb).unwrap();
+
+        let fixed = repair_profile_entries(&real, &snapshot);
+        assert_eq!(fixed, 3, "两条改写 + 一条快照外新增");
+        let linked_now = normalize_link_target(
+            &std::fs::read_link(nm.join("linked")).unwrap().to_string_lossy(),
+        );
+        assert!(linked_now.ends_with("elsewhere"), "linked 恢复为原目标: {linked_now}");
+        let dep_now = normalize_link_target(
+            &std::fs::read_link(scoped_parent.join("dep")).unwrap().to_string_lossy(),
+        );
+        assert!(dep_now.ends_with("scoped-target"), "dep 恢复为原目标: {dep_now}");
+        assert!(!nm.join("fresh-pkg").exists(), "快照外冒烟链接被清除");
+        assert!(nm.join("real-dir").is_dir(), "真实目录不碰");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rename_retry_moves_directory() {
+        let base = std::env::temp_dir().join(format!("dsh-rename-ut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("from").join("lib")).unwrap();
+        std::fs::write(base.join("from").join("lib").join("bin.js"), "x").unwrap();
+        rename_retry(&base.join("from"), &base.join("to")).unwrap();
+        assert!(!base.join("from").exists());
+        assert!(base.join("to").join("lib").join("bin.js").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 }
