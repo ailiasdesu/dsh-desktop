@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {textPreview} from './text.mjs';
 
 /** Independent literal event-text index. Official code owns event decoding and
  * text extraction; this does not replace official ranked full-text search. */
@@ -63,7 +64,7 @@ export class SessionTextIndex {
         const text=this.extractText(event);
         if(!text.toLowerCase().includes(needle))continue;
         if(hits.length===limit){has_more=true;break;}
-        hits.push({session:id,seq:event.seq,preview:Array.from(text).slice(0,240).join('')});
+        hits.push({session:id,seq:event.seq,preview:textPreview(text)});
       }
       return {hits,has_more,engine:'official-fallback'};
     }finally{observation[Symbol.dispose]();}
@@ -77,7 +78,7 @@ export class SessionTextIndex {
       try{
         for(let attempt=0;attempt<2;attempt++){
           const revision=await this.#refresh(id,signal);
-          const result=await this.client.request({op:'search',session:id,query,limit},{signal});
+          const result=await this.client.request({op:'search',session:id,query,limit,expected_revision:revision},{signal});
           const after=await this.#current(id);
           const indexed=JSON.parse(revision);
           if(after.source!==indexed.source||after.revision!==indexed.revision

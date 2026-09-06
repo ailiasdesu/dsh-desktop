@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 mod files;
 mod index;
+pub mod reader;
+mod stream;
 
 pub const PROTOCOL: u32 = 1;
 pub const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
@@ -21,6 +23,11 @@ pub struct Request {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Hello,
+    ReadZstd {
+        root: PathBuf,
+        path: PathBuf,
+        max_bytes: u64,
+    },
     HashFile {
         root: PathBuf,
         path: PathBuf,
@@ -56,6 +63,7 @@ pub enum Operation {
         query: String,
         session: Option<String>,
         limit: usize,
+        expected_revision: Option<String>,
     },
 }
 
@@ -64,6 +72,10 @@ pub enum Operation {
 pub struct Document {
     pub seq: u64,
     pub text: String,
+    #[serde(default)]
+    pub part: u32,
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 pub struct Helper {
@@ -95,6 +107,7 @@ impl Helper {
             return json!({"id": id, "ok": false, "error": "UNSUPPORTED_PROTOCOL"});
         }
         let result = match request.operation {
+            Operation::ReadZstd { .. } => Err("STREAM_TRANSPORT_REQUIRED".into()),
             Operation::Hello => Ok(
                 json!({"protocol": PROTOCOL, "index_schema": 1, "max_request_bytes": MAX_REQUEST_BYTES}),
             ),
@@ -137,9 +150,10 @@ impl Helper {
                 query,
                 session,
                 limit,
+                expected_revision,
             } => self
                 .index()
-                .and_then(|index| index.search(&query, session.as_deref(), limit)),
+                .and_then(|index| index.search(&query, session.as_deref(), limit, expected_revision.as_deref())),
         };
         match result {
             Ok(value) => json!({"id": id, "ok": true, "value": value}),
@@ -178,7 +192,23 @@ pub fn serve(
         }
         let request: Request =
             serde_json::from_slice(&frame).map_err(|e| format!("INVALID_REQUEST: {e}"))?;
-        let response = helper.execute(request);
+        let response = if let Operation::ReadZstd {
+            root,
+            path,
+            max_bytes,
+        } = &request.operation
+        {
+            if request.version != PROTOCOL {
+                json!({"id":request.id,"ok":false,"error":"UNSUPPORTED_PROTOCOL"})
+            } else {
+                match stream::read_zstd(root, path, *max_bytes, request.id, &mut output) {
+                    Ok(value) => json!({"id":request.id,"ok":true,"value":value}),
+                    Err(error) => json!({"id":request.id,"ok":false,"error":error}),
+                }
+            }
+        } else {
+            helper.execute(request)
+        };
         serde_json::to_writer(&mut output, &response).map_err(|e| e.to_string())?;
         output.write_all(b"\n").map_err(|e| e.to_string())?;
         output.flush().map_err(|e| e.to_string())?;

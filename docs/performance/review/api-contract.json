@@ -1,0 +1,8 @@
+{
+  "reviewer": "api-contract",
+  "findings": [],
+  "residual_risks": [
+    "The activation gate pins the CLI plus session and persistence packages, while desktop-native-tools also imports dsh-session-query and cordis APIs without checking their package versions. The current locked 0.1.2-rc.1 bundle provides the expected APIs, but a selectively modified installation under the same CLI version would rely on fail-safe plugin load behavior rather than an explicit compatibility gate."
+  ],
+  "testing_gaps": []
+}

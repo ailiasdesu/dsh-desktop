@@ -1,0 +1,7 @@
+{
+  "run_id": "20260906-release-review",
+  "branch": "perf/rust-data-path",
+  "head_sha": "d10220448d5db05f7dd74ff93a7312f49c9caf54",
+  "verdict": "Ready with fixes",
+  "completed_at": "2026-09-06T10:03:32.9527449Z"
+}

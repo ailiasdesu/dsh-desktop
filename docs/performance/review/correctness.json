@@ -1,0 +1,28 @@
+{
+  "reviewer": "correctness",
+  "findings": [
+    {
+      "title": "Validate the indexed revision even when scoped search returns no hits",
+      "severity": "P2",
+      "file": "desktop/native/session-text.mjs",
+      "line": 86,
+      "confidence": 75,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "why_it_matters": "A search can incorrectly report no matching history when a second helper evicts or replaces that session's derived index after refresh and before search. The authoritative session remains unchanged, so the source check passes, and the per-hit revision check is vacuously false for an empty result; the official fallback is never called. Checking the expected cache revision in the same SQLite read snapshot as the scoped search makes a missing or replaced index a cache miss rather than an authoritative empty answer.",
+      "evidence": [
+        "desktop/native/session-text.mjs:80-87 obtains a revision in #refresh, issues a separate search, and validates cache revisions only through result.hits.some(...); an empty array passes.",
+        "native-helper/src/index.rs search joins documents with sessions and returns only hits/has_more. An absent session or a different revision with no matching rows therefore has no revision metadata in the response.",
+        "native-helper/src/index.rs commit evicts other sessions transactionally; native-helper/tests/cache_limits.rs concurrent_replacement_or_eviction_cannot_commit_stale_import explicitly exercises two helpers sharing this cache. desktop/native/runtime.mjs uses the common DSH_HOME/cache/desktop-native location.",
+        "Read-only Node reproduction used the actual SessionTextIndex with an in-memory client and stable live event {seq:0,text:'find-me'}. Initial search returned one rust hit; deleting the cached state immediately after the next index_state response made the same search return {hits:[],has_more:false,engine:'rust'}, with fallbackObservations=0. No repository or authoritative data was changed."
+      ],
+      "suggested_fix": "Pass the revision returned by #refresh as an expected_revision on scoped search. In Rust, validate the sessions row exists and matches that revision within the same read transaction/snapshot used to fetch hits; return a cache-miss/revision error otherwise so SessionTextIndex retries or uses the official fallback. Cover both eviction and replacement with an empty-match result between refresh and search."
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [
+    "Existing concurrent-cache tests cover stale import commits, but not the refresh-to-search gap in SessionTextIndex. The focused reproduction used the real JS caller with an in-memory transport; add a two-helper integration regression for the proposed fix."
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "reviewer": "security",
+  "findings": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "The reviewed tests exercise traversal and request/slice bounds, but do not cover Windows junction/reparse-point containment or a second-session argument attempting to override desktop_session_search's caller-derived scope. Static inspection found both boundaries enforced; this leaf pass did not execute additional tests."
+  ]
+}

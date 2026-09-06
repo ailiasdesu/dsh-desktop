@@ -1,0 +1,75 @@
+{
+  "mode": "native",
+  "diskCacheControlled": false,
+  "coldProcess": true,
+  "queries": [
+    {
+      "session": "perf-large-0",
+      "round": 0,
+      "ms": 92.07300000000001
+    },
+    {
+      "session": "perf-large-1",
+      "round": 0,
+      "ms": 51.73490000000004
+    },
+    {
+      "session": "perf-large-2",
+      "round": 0,
+      "ms": 50.41919999999999
+    },
+    {
+      "session": "perf-large-3",
+      "round": 0,
+      "ms": 49.32639999999998
+    },
+    {
+      "session": "perf-large-4",
+      "round": 0,
+      "ms": 50.47280000000001
+    },
+    {
+      "session": "perf-large-5",
+      "round": 0,
+      "ms": 52.68830000000003
+    },
+    {
+      "session": "perf-large-0",
+      "round": 1,
+      "ms": 48.6785000000001
+    },
+    {
+      "session": "perf-large-1",
+      "round": 1,
+      "ms": 47.50430000000006
+    },
+    {
+      "session": "perf-large-2",
+      "round": 1,
+      "ms": 51.5299
+    },
+    {
+      "session": "perf-large-3",
+      "round": 1,
+      "ms": 48.23309999999992
+    },
+    {
+      "session": "perf-large-4",
+      "round": 1,
+      "ms": 49.78399999999999
+    },
+    {
+      "session": "perf-large-5",
+      "round": 1,
+      "ms": 52.821699999999964
+    }
+  ],
+  "memory": {
+    "rss": 60645376,
+    "heapTotal": 29990912,
+    "heapUsed": 14281000,
+    "external": 2619381,
+    "arrayBuffers": 89330
+  },
+  "peakTotalPrivateMiB": 88.28125
+}

@@ -1,0 +1,27 @@
+{
+  "reviewer": "adversarial",
+  "findings": [
+    {
+      "title": "Interrupted loaded-image rename leaves launcher missing and rollback blocked",
+      "severity": "P1",
+      "file": "scripts/deploy-performance.py",
+      "line": 106,
+      "confidence": 100,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "why_it_matters": "If deployment terminates after renaming the running desktop executable but before replacing its original path, the next launch fails and the provided rollback command refuses recovery. The journal marks the row as installing, but restore treats the now-missing target as a concurrent edit even though the original bytes remain in its verified backup and retained sibling. Since the executable is deployed last and restored first, this failure also prevents rollback of every earlier payload.",
+      "evidence": [
+        "main records installing=true and saves the manifest before calling atomic (lines 147-148); retainedRunningImage is recorded only after atomic returns (line 149).",
+        "atomic handles a locked image by os.rename(path,moved) at line 35, followed by os.replace(staged,path) at line 36. Abrupt process termination between these operations bypasses its exception recovery and leaves the original target absent.",
+        "restore computes current=None for an absent target at line 103. For an overwritten executable both beforeSha256 and afterSha256 are non-null, so neither the already-restored check at line 104 nor the installed-content check at line 106 accepts this journal-owned intermediate state.",
+        "plan appends dsh-desktop.exe last at line 88; restore iterates reversed(manifest['files']) at line 100 and raises immediately on the missing executable, leaving earlier native/plugin changes installed.",
+        "deployment-tests.py covers interruption before mutation and after full replacement, plus catchable replacement errors; it does not exercise the intermediate renamed-but-not-replaced state."
+      ],
+      "suggested_fix": "Journal the deterministic retained-image path and rename intent before moving a loaded target. During restore, recognize a missing target only when that recorded, root-contained sibling has the expected hash, then restore the verified original bytes or rename the sibling back. Apply the same recovery protocol to rollback's own loaded-image rename so interrupted rollback can resume. Add focused interruption tests between rename and replace for both deployment and rollback while retaining refusal of unrelated missing/modified targets."
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": []
+}

@@ -1,0 +1,1 @@
+{"validated":false,"reason":"Cancellation is cooperative, but no concrete indefinitely stalled regular-file read was established, and src-tauri/src/kernel.rs already escalates shutdown to a process-tree kill after eight seconds, so the claimed user-visible failure is insufficiently supported."}

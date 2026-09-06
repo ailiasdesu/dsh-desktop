@@ -65,3 +65,15 @@ test('in-flight abort ends a native operation and leaves the client restartable'
   await assert.rejects(request,/cancel in flight/);
   assert.equal((await client.request({op:'hello'})).protocol,1);
 });
+
+test('multi-megabyte documents retain boundary hits once with original Unicode preview',async t=>{
+  const {client}=await fixture(t);
+  const text='原始ABC😀'+ 'x'.repeat(65520)+'跨界NEEDLE测试'+'y'.repeat(2*1024*1024)+'最终TAIL';
+  await client.importDocuments({session:'large',revision:'r1',documents:[{seq:4,text}]});
+  assert.equal((await client.request({op:'index_state',session:'large'})).documents,1);
+  for(const query of ['跨界needle测试','最终tail','xxxx跨界']){
+    const result=await client.request({op:'search',session:'large',query,limit:20});
+    assert.equal(result.hits.length,1);assert.equal(result.hits[0].seq,4);
+    assert(result.hits[0].preview.startsWith('原始ABC😀'));assert.equal(result.has_more,false);
+  }
+});

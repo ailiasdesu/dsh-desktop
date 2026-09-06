@@ -1,6 +1,6 @@
 [package]
 name = "dsh-desktop"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 rust-version = "1.77"
 description = "DSH Desktop - 原生 Windows 桌面壳（Tauri 2.x），属主管理 DSH 内核子进程"

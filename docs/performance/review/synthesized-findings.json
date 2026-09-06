@@ -1,0 +1,37 @@
+[
+  {
+    "title": "Scoped searches scan every cached session",
+    "severity": "P2",
+    "file": "native-helper/src/index.rs",
+    "line": 426,
+    "confidence": 75,
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "pre_existing": false,
+    "suggested_fix": "Select separate scoped and global SQL statements. For Some(session), use WHERE d.session=?1 AND instr(d.folded,?2)>0 so the existing (session,seq,part) primary key can seek directly to that session. Preserve the current grouping, limit, revision snapshot, and global-search behavior. Verify equivalent results and indexed scoped access with multiple cached sessions.",
+    "why_it_matters": "The deployed desktop_session_search always supplies its current session, but the optional-scope OR predicate prevents an index seek. No-match scoped searches walk every cached document index entry, so searching one small session becomes progressively slower as unrelated histories accumulate. This defeats isolation of scoped search cost in the shared cache (up to 4096 sessions); the fix needs no new index or semantic change.",
+    "evidence": [
+      "git diff c139f1f -- native-helper/src/index.rs identifies this as a new file and line 426 as an added optional-scope predicate, so the behavior is introduced by this shipping change.",
+      "desktop/native/tools-plugin.mjs:18 passes exec.agent.session.id to index.search; desktop/native/session-text.mjs sends that ID as the search operation session.",
+      "On Python SQLite 3.45.3, an in-memory reproduction of the query and primary keys produces EXPLAIN QUERY PLAN: SCAN d USING INDEX sqlite_autoindex_documents_1. Replacing only (?1 IS NULL OR d.session=?1) with d.session=?1 produces SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?).",
+      "A bounded in-memory experiment with 100 sessions and 100 short documents each, querying absent in s050 with limit 21, returned identical empty results: current SQL executed 50358 SQLite VM instructions versus 653 for the direct scoped predicate. This measures query work, not production wall-clock latency. No repository, user, or persistent database was modified."
+    ],
+    "#": 1,
+    "reviewers": [
+      "performance"
+    ],
+    "validation": {
+      "validated": true,
+      "reason": "The scoped-search finding is a concrete introduced performance defect, not merely the intentional bounded substring scan. A substring search must examine the selected session's text, but the optional-scope OR causes traversal of unrelated cached sessions too. The shipping tool always supplies its current session, and cache limits allow 4096 sessions and 1 GiB. Separating scoped SQL removes avoidable cache-wide work without changing substring semantics, snapshot revision checks or the schema.",
+      "evidence": [
+        "Independently extracted the exact SQL from native-helper/src/index.rs and reproduced its table definitions in an in-memory Python SQLite 3.45.3 database with 100 sessions and 100 documents each; no repository files or persistent database were modified.",
+        "For the same no-match query scoped to s050, current SQL returned no rows and EXPLAIN QUERY PLAN reported SCAN d USING INDEX sqlite_autoindex_documents_1; it executed 50358 VM instructions. Changing only the optional-scope OR to d.session=?1 returned the same result, reported SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?), and executed 652 VM instructions.",
+        "native-helper/Cargo.toml selects rusqlite bundled SQLite; Cargo.lock pins libsqlite3-sys 0.30.1. Its installed sqlite3/sqlite3.c defines SQLITE_VERSION 3.46.0 at line 462.",
+        "Inspected the exact bundled SQLite amalgamation's exprAnalyzeOrTerm at lines 160834-160869 and 160909-160967: usable OR access requires all disjuncts to be indexable for the same table, intersects their table masks, and requires equality terms for OR-to-IN conversion. The parameter-only ?1 IS NULL disjunct is not a document-column constraint. The multi-index OR loop at lines 166687-166689 requires that resulting indexable mask. This supports the same planner limitation in the shipped dependency.",
+        "desktop/native/tools-plugin.mjs passes exec.agent.session.id into SessionTextIndex.search, and desktop/native/session-text.mjs includes that session ID in the helper search request. The all-session path exists but is not the shipping tool's normal use."
+      ],
+      "verification_boundary": "VM counts and plans were executed with system SQLite 3.45.3; bundled SQLite 3.46.0 was inspected at source level, not executed in a new harness. This is query-work evidence, not a production wall-clock benchmark. A targeted query-plan check on the bundled version is appropriate when implementing the fix."
+    }
+  }
+]

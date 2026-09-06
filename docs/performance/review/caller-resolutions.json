@@ -1,0 +1,25 @@
+{
+  "allActionableFindingsResolved": true,
+  "resolutions": [
+    {
+      "finding": "Scoped empty cache result race",
+      "evidence": "final-search-tests.log; real second-helper eviction/replacement tests"
+    },
+    {
+      "finding": "Interrupted executable rename recovery",
+      "evidence": "final-deployment-tests.log; install and rollback interruption fixtures"
+    },
+    {
+      "finding": "Scoped SQLite scan",
+      "evidence": "Direct d.session=?1 predicate under same read snapshot; final-rust-tests.log and index-final/summary.json"
+    },
+    {
+      "finding": "Tracked Python bytecode",
+      "evidence": "Removed from index; __pycache__ and *.py[cod] ignored"
+    },
+    {
+      "finding": "Stale implementation tracker",
+      "evidence": "Updated current states and final release report"
+    }
+  ]
+}

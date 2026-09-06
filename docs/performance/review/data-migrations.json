@@ -1,0 +1,26 @@
+{
+  "reviewer": "data-migrations",
+  "findings": [],
+  "residual_risks": [
+    "The document-key migration is forward-only inside disposable desktop-native cache. Returning to a helper that expects the legacy document shape may require retiring that derived cache with all helper processes stopped; authoritative session logs remain untouched and official fallback remains available."
+  ],
+  "testing_gaps": [],
+  "deployment_notes": {
+    "reviewed": [
+      "native-helper/src/index.rs opens only desktop-text-v1.sqlite under the independently owned cache directory; runtime.mjs selects DSH_HOME/cache/desktop-native.",
+      "Legacy rows map session, seq, text and folded unchanged, with part=0 and preview=NULL. BEGIN IMMEDIATE covers rename, copy, drop, default-backed quota columns, backfill and LRU index creation; migration errors roll back.",
+      "Cache eviction and suffix replacement commit atomically with revision comparison. Search revision validation and result selection share one SQLite snapshot, including empty results.",
+      "Existing migration, quota, disk-full and two-helper tests were inspected; previously reported passing tests were not rerun."
+    ],
+    "verification_queries": [
+      "PRAGMA user_version;",
+      "PRAGMA quick_check;",
+      "PRAGMA table_info(documents);",
+      "PRAGMA table_info(sessions);",
+      "SELECT d.session FROM documents d LEFT JOIN sessions s USING(session) WHERE s.session IS NULL LIMIT 1;",
+      "SELECT s.session FROM sessions s WHERE s.documents <> (SELECT COUNT(DISTINCT seq) FROM documents d WHERE d.session=s.session) LIMIT 1;",
+      "SELECT session,seq FROM documents GROUP BY session,seq HAVING MIN(part)<>0 OR MAX(part)+1<>COUNT(*) LIMIT 1;"
+    ],
+    "query_caveat": "Run optional integrity queries only against the derived cache; quick_check should return ok and invariant queries should return no rows. Do not mutate or migrate official logs or official index databases."
+  }
+}

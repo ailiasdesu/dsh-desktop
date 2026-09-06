@@ -1,0 +1,20 @@
+[package]
+name = "dsh-native-reader"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+dsh-native-helper = { path = "../native-helper" }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

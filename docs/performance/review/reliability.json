@@ -1,0 +1,31 @@
+{
+  "reviewer": "reliability",
+  "findings": [
+    {
+      "title": "Native add-on timeout cannot interrupt a stalled read",
+      "severity": "P2",
+      "file": "desktop/native/addon.mjs",
+      "line": 22,
+      "why_it_matters": "A session load can remain pending indefinitely when the underlying file read stalls, so the 120-second native timeout never reaches the official JavaScript fallback and application shutdown can also wait forever. The timer only sets a cancellation flag, while the add-on awaits the native task and the synchronous Rust read observes cancellation only after the blocking read returns. Running this read through the already killable helper-process boundary, or otherwise adding a hard completion bound outside the in-process native task, makes timeout and shutdown behavior enforceable.",
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Route native zstd reads through the NativeClient helper subprocess (whose timeout kills the process), or add an equivalent isolated boundary that can be forcibly terminated; ensure request() rejects at timeout and close() has a bounded wait, then verify official fallback after a deliberately stalled read.",
+      "confidence": 75,
+      "evidence": [
+        "desktop/native/addon.mjs:22-30 -- the timeout calls reader.close(), but execution then remains at `await pending` until the native promise settles.",
+        "desktop/native/addon.mjs:45-49 -- cleanup awaits the same pending task, and close() awaits all running reads without a second timeout.",
+        "native-addon/src/lib.rs:54-73 and native-helper/src/reader.rs:66-96 -- close only sets an AtomicBool; cancellation is checked between decode iterations, while `decoder.read(...)` is a synchronous filesystem read that must return before the flag is observed."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [
+    "Successful loaded-image replacement retains `.before-native-*` sibling binaries with no cleanup path; this is bounded per deployment but can accumulate across repeated upgrades.",
+    "Rollback trusts any manifest located beneath install/repair-checks; an accidentally selected or locally modified manifest can operate on allowed install/plugin targets, although hash checks limit ordinary stale-manifest damage."
+  ],
+  "testing_gaps": [
+    "No fault-injection test holds a native add-on read pending past timeout and proves request rejection, official fallback, and bounded AddonReadTransport.close().",
+    "Deployment tests cover journal states before and after mutation, but not process interruption during loaded-image rename/replacement followed by rollback and retained-image cleanup."
+  ]
+}

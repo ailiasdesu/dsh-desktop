@@ -1,6 +1,6 @@
 # Performance route implementation progress
 
-2026-09-06. Goal remains active. Nothing from this branch has been deployed into the running desktop yet.
+2026-09-06. Goal remains active. The 0.2.5 runtime files and selected Advisor patch are installed. The pre-existing user window was deliberately not closed; normal exit/reopen activates the new image.
 
 ## Implemented and exercised
 
@@ -21,11 +21,23 @@ The final helper subsequently gained lazy DB opening and cache/import limits. Re
 
 Latest verification: 10 Rust tests and 7 Node/official-service integration tests passed. Current helper is approximately 2 MiB. Commit `8ba6914` records the first implementation and search/cache evidence; file benchmarks are a subsequent checkpoint. No production configuration, original session file, or running desktop has been changed by this route implementation.
 
-## Still required
+## Current release checkpoint
 
-1. Integrate native functions into real desktop/plugin user and agent entry points, preserving existing actions; presently these are executable/tested modules, not installed features.
-2. Complete cache quota/eviction and large-document handling: bounded refusal currently falls back correctly but cannot yet accelerate every very large session. Do not truncate user content to get a passing performance result.
-3. Add small/medium/large file and text-processing comparisons (including streaming Node baseline, not only whole-buffer Node), targeted plugin incremental-statistics work, and actual active-turn timing.
-4. Implement/evaluate native streaming history-read assistance at public/versioned seams, preserving official repair/packed/provenance behavior. Investigate true page-source support; current official history path still materializes full events.
-5. Validate production packaging, compatibility/version fallback, per-plugin regression tests, real background runtime integration, UI latency where accessible, and upgrade/rollback behavior.
-6. Review code and re-measure final artifacts before deployment. No claim that all route requirements are finished.
+- Native history reads now use an optional Node-API addon with bounded 4 MiB prefetch. Public loadStored override delegates event decoding, replay validation, durable writes and repairs to official packages. No vendor kernel source was patched.
+- Differential tests cover packed rows/provenance, Unicode/frame boundaries, corrupt/truncated/checksum input, all skippable magics and unsupported descriptor bits, version mismatch, file replacement/append during reads, and cancellation. Final Node suite: 24 tests pass. Native helper Rust suite contains protocol/cache/chunks/stream tests; shell suite: 23 tests pass.
+- Full isolated DSH CLI verified custom persistence root/cache/packing config preservation, native search through the real tool pipeline, actual history WebSocket snapshot, stock fallback, and clean exit. The fixture has a real workspace header; original event prefix is preserved. Normal UI lifecycle metadata is compared with the stock mode, not falsely classified as decoder mutation.
+- Last successful large-history benchmark (`results/history-addon-prefetch/summary.json`): 128 MiB synthetic history, five independent processes per mode; p95 908.45 -> 648.62 ms, median total private peak 522.95 -> 352.70 MiB. Those values are the named benchmark artifact, not a blanket real-user speedup promise. Later correctness fixes require final release smoke/verification, not silent relabeling of old measurements.
+- Advisor incremental unit: 136 parity tests, no full snapshots on normal event streams; deployment is limited to the three files in its manifest. Its isolated 100000-turn benchmark improves observer p95 52.41 -> 0.14 ms and peak RSS 461.56 -> 165.42 MiB; this is not whole-app RSS.
+- Side-panel candidate is NOT selected for installation: it improved repeated preview but regressed six-file rotation and retained more memory. Its source/measurements remain in the excluded experimental folder for future work. Existing side-panel UI/runtime remain unchanged.
+- Raw hash/slice primitives are built and measured, but the current official Fs provider lacks a binary-stream/hash capability seam. Do not bypass provider semantics or perform a second full read merely to claim Rust integration. File primitive benchmark remains explicitly separate from attachment/UI performance.
+- Actual cold history profile shows remaining synchronous official title-normalization/projection work after decoding. Replacing those business reducers would fight the update boundary; they remain official. True disk pagination is conditional on a future public range-source API and is not falsely represented by a preview.
+- Confirmed review fixes: scoped expected_revision is checked in the same SQLite snapshot even for zero hits; install and rollback journals recover the renamed-but-not-replaced executable state; bytecode is excluded. Deployment tests: 9 pass, including a real running Windows image replacement without stopping it.
+- Source packaging baseline synchronized to the installed 0.1.2-rc.1 bundle (24998 files, no links); old source bundle retained. Shell version is 0.2.5. Release build runs in a hidden process with durable logs/status under target/release-build-*.
+
+## Final installation checkpoint
+
+17 installed files verified against the backed-up manifest; installed mirror smoke returned MIRROR_SMOKE_OK; installed-module full CLI/history WebSocket/tool and stock fallback passed. Original 21 compatibility tests and 45-file check passed. The source-config checksum refresh and balanced-read-policy refresh retain prior bytes and provenance in the same deployment backup.
+
+Final history benchmark: p95 653.93 -> 470.56 ms, total private peak 522.72 -> 356.43 MiB. Default native threshold is now 32 MiB compressed: the small/mid history policy benchmark stays on stock reads (p95 110.34 vs 110.32 ms), avoiding the 4 MiB threshold's marginal-regression case. Final text-index total private peak is 410.02 -> 87.98 MiB.
+
+All 13 selected review roles completed. Confirmed findings fixed and verified; advisory limitations documented. The optional side-panel candidate remains rejected, not installed. Remaining operational work: finish installer-only repack, record final package hash and completion audit, commit delivery records. No further feature code is pending.

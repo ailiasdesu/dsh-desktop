@@ -1,0 +1,35 @@
+{
+  "reviewer": "performance",
+  "findings": [
+    {
+      "title": "Scoped searches scan every cached session",
+      "severity": "P2",
+      "file": "native-helper/src/index.rs",
+      "line": 426,
+      "confidence": 75,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Select separate scoped and global SQL statements. For Some(session), use WHERE d.session=?1 AND instr(d.folded,?2)>0 so the existing (session,seq,part) primary key can seek directly to that session. Preserve the current grouping, limit, revision snapshot, and global-search behavior. Verify equivalent results and indexed scoped access with multiple cached sessions.",
+      "why_it_matters": "The deployed desktop_session_search always supplies its current session, but the optional-scope OR predicate prevents an index seek. No-match scoped searches walk every cached document index entry, so searching one small session becomes progressively slower as unrelated histories accumulate. This defeats isolation of scoped search cost in the shared cache (up to 4096 sessions); the fix needs no new index or semantic change.",
+      "evidence": [
+        "git diff c139f1f -- native-helper/src/index.rs identifies this as a new file and line 426 as an added optional-scope predicate, so the behavior is introduced by this shipping change.",
+        "desktop/native/tools-plugin.mjs:18 passes exec.agent.session.id to index.search; desktop/native/session-text.mjs sends that ID as the search operation session.",
+        "On Python SQLite 3.45.3, an in-memory reproduction of the query and primary keys produces EXPLAIN QUERY PLAN: SCAN d USING INDEX sqlite_autoindex_documents_1. Replacing only (?1 IS NULL OR d.session=?1) with d.session=?1 produces SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?).",
+        "A bounded in-memory experiment with 100 sessions and 100 short documents each, querying absent in s050 with limit 21, returned identical empty results: current SQL executed 50358 SQLite VM instructions versus 653 for the direct scoped predicate. This measures query work, not production wall-clock latency. No repository, user, or persistent database was modified."
+      ]
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [
+    "The query-plan/VM reproduction used system Python SQLite 3.45.3; independent validation against the bundled rusqlite SQLite should confirm the scoped-scan finding before resolution."
+  ],
+  "coverage": {
+    "scope": ["native-helper/src/index.rs", "native-helper/src/lib.rs", "desktop/native/session-text.mjs", "desktop/native/client.mjs", "desktop/native/tools-plugin.mjs", "desktop/native/runtime.mjs", "desktop/native/addon.mjs", "scripts/native-hash.ps1", "scripts/build-native.ps1", "scripts/deploy-performance.py"],
+    "checks": ["SQLite cache limits, import batching, LRU access, search query and snapshot", "Shipping scoped-search caller and helper transport", "Deployment hash streaming and cold-path file handling", "Bounded in-memory SQLite query-plan and VM instruction comparison"],
+    "excluded": ["Rejected side-panel experiment", "Non-manifest Advisor copied dependencies", "Long benchmarks", "Build/install pending evidence treated as workflow state, not code defects"],
+    "source_edits": false,
+    "base": "c139f1f"
+  }
+}

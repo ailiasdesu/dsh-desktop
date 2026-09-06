@@ -1,0 +1,21 @@
+{
+  "package": "dsh-memory-evolve",
+  "packageVersion": "0.1.0",
+  "files": [
+    {
+      "path": "lib/advisor/index.js",
+      "sha256": "b015f0aafb8b92274fbba643e6dc67cde17c34be99c5622ff7f0599070003502",
+      "expectedOriginalSha256": "c9b880f737717cda43a65213462a19091b8618c16aa3bb7df5635314e40dec1f"
+    },
+    {
+      "path": "lib/advisor/observer.js",
+      "sha256": "c8696f1a565e19ad2c9cc7aebb707b85d59baffd2f4488c16ac6ec40a6602f48",
+      "expectedOriginalSha256": "9b02868db6bd21cbe83181b48895ed9d5fc2346d724e5e967eae12ee95ac19d1"
+    },
+    {
+      "path": "lib/advisor/turn-tracker.js",
+      "sha256": "1cb5750075237ebf02b1959fd2fb424db176b8e431ea140bf86f8ef1933315ea",
+      "expectedOriginalSha256": null
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "reviewer": "maintainability",
+  "findings": [
+    {
+      "title": "Generated Python bytecode is tracked",
+      "severity": "P2",
+      "file": "scripts/__pycache__/deploy-performance.cpython-312.pyc",
+      "line": 1,
+      "why_it_matters": "The release diff carries an interpreter-specific compiled copy of the deployment script alongside its source. Future edits can leave this opaque artifact stale, and repository consumers on another Python version cannot review or reproduce it from the diff. Removing it keeps the deployment implementation single-sourced in deploy-performance.py.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": false,
+      "suggested_fix": "Remove scripts/__pycache__/deploy-performance.cpython-312.pyc from the index and add __pycache__/ and *.py[cod] to .gitignore.",
+      "confidence": 100,
+      "evidence": [
+        "git diff --summary c139f1f reports create mode 100644 scripts/__pycache__/deploy-performance.cpython-312.pyc.",
+        "git ls-files reports scripts/__pycache__/deploy-performance.cpython-312.pyc, while .gitignore has no __pycache__ or *.pyc rule."
+      ],
+      "pre_existing": false
+    },
+    {
+      "title": "Authoritative implementation tracker is stale",
+      "severity": "P2",
+      "file": "docs/performance/IMPLEMENTATION.md",
+      "line": 10,
+      "why_it_matters": "A maintainer using the document as its declared authoritative tracker will be told that large-document/cache eviction, production bridge integration, the session read path, and packaging are still pending even though this release diff contains those implementations and their focused tests. That sends follow-up work toward already completed areas and obscures the genuinely outstanding live-deployment and pagination work. Updating the states and linking the existing evidence makes the release boundary reviewable later.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": false,
+      "suggested_fix": "Update rows 10-15 to reflect the implemented helper limits, production plugins, native read adapter, packaging/deployment journal, and available result files; keep live deployment and true disk pagination explicitly pending where they remain outstanding.",
+      "confidence": 100,
+      "evidence": [
+        "docs/performance/IMPLEMENTATION.md:3 calls this the authoritative objective, and line 19 says to update evidence paths and state as work lands.",
+        "docs/performance/IMPLEMENTATION.md:10-14 still says large-document/cache eviction remains, production plugin integration remains, and session read/packaging are pending.",
+        "The same release diff adds native-helper/tests/cache_limits.rs and document_chunks.rs, desktop/native/persistence-plugin.mjs and tools-plugin.mjs, desktop/native/persistence.mjs, src-tauri resource/build entries, and scripts/deploy-performance.py."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [
+    "Kernel compatibility version 0.1.2-rc.1 is repeated independently in desktop/native/activation.js, persistence.mjs, session-text.mjs, and scripts/deploy-performance.py. The checks currently agree, but an official-kernel upgrade requires coordinated edits across activation, fallback, and deployment paths; a shared generated compatibility manifest would reduce drift.",
+    "The native helper protocol number is duplicated between Rust and two JavaScript transports. Current values all equal 1, but there is no single generated contract or mandatory handshake in NativeClient, so a future partial upgrade could fail only after the first real operation."
+  ],
+  "testing_gaps": []
+}

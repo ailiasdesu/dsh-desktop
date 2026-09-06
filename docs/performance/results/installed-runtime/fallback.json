@@ -1,0 +1,47 @@
+{
+  "mode": "fallback",
+  "resources": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop",
+  "status": {
+    "ok": true,
+    "value": {
+      "native": false,
+      "config": {
+        "root": "D:\\文件存放处\\code\\dsh desktop版 以及dsh插件制作\\dsh-desktop\\target\\native-runtime\\custom-sessions",
+        "packChunks": false,
+        "compression": "zstd",
+        "preparedSessionCacheSize": 3,
+        "writeBatchMaxDelayMs": 200
+      }
+    }
+  },
+  "historySnapshot": {
+    "headerId": "perf-huge-0",
+    "cursor": 12287,
+    "records": 2,
+    "payloadBytes": 455748
+  },
+  "inspect": {
+    "ok": true,
+    "value": {
+      "events": 12288,
+      "last": "turn/end",
+      "originalPrefixLast": "turn/end",
+      "metadataEventTypes": [],
+      "native": false
+    }
+  },
+  "healthLatencyMs": [
+    30.999999999039574,
+    15.99999999962165,
+    0.0,
+    0.0,
+    0.0,
+    16.00000000325963,
+    14.999999999417923,
+    469.0000000009604,
+    469.0000000009604,
+    15.99999999962165,
+    0.0
+  ],
+  "exitCode": 0
+}

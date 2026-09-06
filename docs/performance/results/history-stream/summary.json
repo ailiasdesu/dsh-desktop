@@ -1,0 +1,19 @@
+{
+  "fixture": "entropy-varied synthetic small/medium/large histories",
+  "variants": [
+    {
+      "mode": "official",
+      "peakTotalPrivateMiB": 328.28515625,
+      "largeP95Ms": 114.58890000000002,
+      "eventLoopP95Ms": 89.587711,
+      "eventLoopMaxMs": 98.435071
+    },
+    {
+      "mode": "native",
+      "peakTotalPrivateMiB": 389.98046875,
+      "largeP95Ms": 248.60860000000002,
+      "eventLoopP95Ms": 16.269311,
+      "eventLoopMaxMs": 30.801919
+    }
+  ]
+}

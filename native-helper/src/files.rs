@@ -6,7 +6,7 @@ use std::path::Path;
 
 const CHUNK: usize = 128 * 1024;
 
-fn open_scoped(root: &Path, path: &Path) -> Result<File, String> {
+pub(crate) fn open_scoped(root: &Path, path: &Path) -> Result<File, String> {
     if !root.is_absolute()
         || path.is_absolute()
         || path
@@ -61,7 +61,7 @@ fn verify_open_handle(_file: &File, _root: &Path) -> Result<(), String> {
     Err("FILE_OPERATIONS_NOT_VALIDATED_ON_THIS_PLATFORM".into())
 }
 
-fn unchanged(before: &Metadata, after: &Metadata) -> Result<(), String> {
+pub(crate) fn unchanged(before: &Metadata, after: &Metadata) -> Result<(), String> {
     if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
         Err("FILE_CHANGED_DURING_READ".into())
     } else {

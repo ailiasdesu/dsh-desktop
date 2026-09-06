@@ -1,0 +1,22 @@
+{
+  "reviewer": "learnings",
+  "findings": [],
+  "learnings": [
+    {
+      "source": "docs/performance/PROGRESS.md:14",
+      "type": "documented-experiment",
+      "summary": "Reduced cache capacity regressed rotating-history p95; preserve original cache default and reject the side-panel experiment."
+    },
+    {
+      "source": "docs/performance/PROGRESS.md:16-20",
+      "type": "evidence-boundary",
+      "summary": "Keep initial index cost separate from reused-index results; measurements from an earlier helper and uncontrolled disk cache do not establish final package or UI performance."
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [],
+  "coverage": [
+    "No docs/solutions directory exists in this checkout; no Known Pattern source found.",
+    "Read project performance progress and reused review context; no repository edits or benchmark reruns."
+  ]
+}

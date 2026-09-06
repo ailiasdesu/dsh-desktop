@@ -1,0 +1,39 @@
+{
+  "reviewer": "deployment-verification",
+  "findings": [],
+  "residual_risks": [
+    "Replacing a loaded Windows executable changes the next launch; the current process continues using its retained image. Activation and rollback therefore require verification after a normal restart, without terminating a user session.",
+    "Rollback intentionally refuses foreign edits and tampered backups. Preserve the manifest, byte backups and journal-owned retained images until recovery and post-restart verification are complete.",
+    "The migration journal supports process interruption, but its writes are not explicitly fsync-backed; sudden power loss durability was not established by the inspected interruption tests."
+  ],
+  "testing_gaps": [
+    "Final source-to-built-artifact hashes, NSIS bundle inspection, actual installation and post-restart runtime evidence remain pending with the parent release workflow. These are release evidence gates, not asserted code defects."
+  ],
+  "deployment_notes": {
+    "status": "Code review found no additional concrete deployment defects; release acceptance remains conditional on the pending build and installation evidence.",
+    "reviewed": [
+      "build-native.ps1 builds both locked Cargo manifests, copies the helper and Node addon, then hashes their bytes into native/manifest.json using native-hash.ps1.",
+      "run-release-build.ps1 records native Tauri exit status in target/release-build-result.json; ensure the root target directory exists before launching this wrapper.",
+      "Tauri resources include desktop/native and native, and desktop package/config versions both read 0.2.5. verify-desktop-binary.ps1 validates ProductVersion and outputs SHA256.",
+      "deploy-performance.py checks native and Advisor payload hashes, guards the verified kernel and Advisor version, validates destination containment, backs up previous bytes and installs the desktop executable last.",
+      "The Advisor deployment manifest names exactly index.js, observer.js and turn-tracker.js; the rejected side-panel experiment is excluded.",
+      "Install and rollback image-rename intent is journaled before rename. Recovery validates the expected sibling name, roots and SHA256 before restoring. The nine reported passing deployment tests were inspected, not rerun."
+    ],
+    "checklist": [
+      "Record the exact reviewed source revision and working-tree state, require release-build-result.json exitCode=0, and preserve full build output.",
+      "Verify the executable ProductVersion is 0.2.5 and record its SHA256; match bundled native payload hashes to native/manifest.json and verify expected adapter resources exist in the bundle.",
+      "Run deploy-performance.py without --apply and preserve its concrete target list before the authorized installation step.",
+      "After apply, require manifest status=applied and verify each target against afterSha256; preserve the rollback directory.",
+      "After a normal desktop restart, confirm the actual executable path/version, native persistence activation, session search behavior and helper disposal using the parent runtime checks.",
+      "Verify native-disabled and unsupported-kernel paths retain official session access. Compare original session data/config using the parent baseline evidence.",
+      "Review native cache integrity using the queries in data-migrations.json when needed; never run migration or cleanup against authoritative logs."
+    ],
+    "rollback": [
+      "Use scripts/deploy-performance.py --install <same-install-root> --plugin <same-plugin-root> --rollback <owned-backup-manifest.json>.",
+      "Require manifest status=rolled-back and confirm all restored targets equal beforeSha256, with originally absent files absent.",
+      "If interruption occurs, rerun rollback with the same manifest. Do not remove retained images or alter journal entries to bypass ownership/hash failures.",
+      "A currently loaded newly installed addon or executable may keep its running process on the new implementation until normal exit. Verify restored behavior only after normal restart; do not stop the user's process as part of this review.",
+      "Cache schema rollback is unnecessary for official operation because the cache is disposable and original logs are not rewritten."
+    ]
+  }
+}

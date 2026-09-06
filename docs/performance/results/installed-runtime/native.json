@@ -1,0 +1,88 @@
+{
+  "mode": "native",
+  "resources": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop",
+  "status": {
+    "ok": true,
+    "value": {
+      "native": true,
+      "metrics": {
+        "attempts": 0,
+        "hits": 0,
+        "fallbacks": 0,
+        "skipped": 0
+      },
+      "config": {
+        "root": "D:\\文件存放处\\code\\dsh desktop版 以及dsh插件制作\\dsh-desktop\\target\\native-runtime\\custom-sessions",
+        "packChunks": false,
+        "compression": "zstd",
+        "preparedSessionCacheSize": 3,
+        "writeBatchMaxDelayMs": 200
+      }
+    }
+  },
+  "historySnapshot": {
+    "headerId": "perf-huge-0",
+    "cursor": 12287,
+    "records": 2,
+    "payloadBytes": 455748
+  },
+  "inspect": {
+    "ok": true,
+    "value": {
+      "events": 12288,
+      "last": "turn/end",
+      "originalPrefixLast": "turn/end",
+      "metadataEventTypes": [],
+      "native": true,
+      "metrics": {
+        "attempts": 1,
+        "hits": 1,
+        "fallbacks": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "healthLatencyMs": [
+    47.0000000022992,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    30.999999999039574,
+    15.99999999962165,
+    15.99999999962165,
+    15.99999999962165,
+    15.99999999962165,
+    0.0,
+    0.0,
+    0.0,
+    15.99999999962165,
+    15.99999999962165,
+    0.0,
+    0.0,
+    14.999999999417923,
+    15.99999999962165,
+    15.99999999962165,
+    0.0,
+    14.999999999417923,
+    15.99999999962165,
+    0.0,
+    16.00000000325963,
+    0.0,
+    31.9999999992433,
+    437.0000000017171,
+    30.999999999039574
+  ],
+  "tool": {
+    "hits": [
+      {
+        "preview": "NATIVE_ACCEPTANCE_NEEDLE 中文",
+        "seq": 4,
+        "session": "session-native-tool-0876c508-dd4c-4950-8154-e16f5fc97775"
+      }
+    ],
+    "has_more": false,
+    "engine": "rust"
+  },
+  "exitCode": 0
+}

@@ -1,0 +1,30 @@
+{
+  "resolved_findings": [
+    {
+      "title": "Validate the indexed revision even when scoped search returns no hits",
+      "status": "resolved-by-caller",
+      "source": "correctness.json",
+      "evidence": [
+        "desktop/native/session-text.mjs:81 passes expected_revision from refresh.",
+        "native-helper/src/index.rs:414-442 checks sessions.revision inside the same SQLite snapshot as the hit query.",
+        "scripts/performance/session-text.test.mjs:52-68 exercises eviction and replacement through a second real NativeClient between refresh and search."
+      ],
+      "execution": "New regression source inspected; test execution owned by caller."
+    },
+    {
+      "title": "Interrupted loaded-image rename leaves launcher missing and rollback blocked",
+      "status": "resolved-by-caller",
+      "source": "adversarial.json",
+      "evidence": [
+        "scripts/deploy-performance.py journals renameIntent and rollbackRenameIntent through callbacks before atomic loaded-image moves.",
+        "restore recognizes missing targets only for exact owned sibling names with expected hashes, restores original bytes, and refuses unowned/tampered state.",
+        "scripts/performance/deployment-tests.py:51-70 covers install interruption, rollback interruption, and refusal."
+      ],
+      "execution": "New regression source inspected; final Windows test execution owned by caller."
+    }
+  ],
+  "findings": [],
+  "testing_gaps": [],
+  "reviewer": "resolution-check",
+  "residual_risks": []
+}

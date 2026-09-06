@@ -1,0 +1,75 @@
+{
+  "mode": "native",
+  "diskCacheControlled": false,
+  "coldProcess": true,
+  "queries": [
+    {
+      "session": "perf-large-0",
+      "round": 0,
+      "ms": 90.32299999999998
+    },
+    {
+      "session": "perf-large-1",
+      "round": 0,
+      "ms": 54.94349999999997
+    },
+    {
+      "session": "perf-large-2",
+      "round": 0,
+      "ms": 50.15540000000004
+    },
+    {
+      "session": "perf-large-3",
+      "round": 0,
+      "ms": 49.36439999999999
+    },
+    {
+      "session": "perf-large-4",
+      "round": 0,
+      "ms": 56.34140000000002
+    },
+    {
+      "session": "perf-large-5",
+      "round": 0,
+      "ms": 56.20550000000003
+    },
+    {
+      "session": "perf-large-0",
+      "round": 1,
+      "ms": 53.45099999999991
+    },
+    {
+      "session": "perf-large-1",
+      "round": 1,
+      "ms": 53.03329999999994
+    },
+    {
+      "session": "perf-large-2",
+      "round": 1,
+      "ms": 49.160499999999956
+    },
+    {
+      "session": "perf-large-3",
+      "round": 1,
+      "ms": 53.407299999999964
+    },
+    {
+      "session": "perf-large-4",
+      "round": 1,
+      "ms": 48.702800000000025
+    },
+    {
+      "session": "perf-large-5",
+      "round": 1,
+      "ms": 48.78559999999993
+    }
+  ],
+  "memory": {
+    "rss": 60174336,
+    "heapTotal": 29728768,
+    "heapUsed": 14284072,
+    "external": 2619381,
+    "arrayBuffers": 89330
+  },
+  "peakTotalPrivateMiB": 87.9765625
+}

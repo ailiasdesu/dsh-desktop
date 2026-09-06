@@ -1,0 +1,323 @@
+{
+  "status": "complete",
+  "verdict": "Ready with fixes",
+  "verdict_reason": "One independently confirmed P2 scoped-search performance defect remains. Four prior findings are resolved in current source/docs; one timeout finding was rejected by independent validation. This is a source review verdict; final packaging, installation and whole-route performance acceptance remain pending with the caller.",
+  "scope": {
+    "base": "c139f1f",
+    "branch": "perf/rust-data-path",
+    "head_sha": "d10220448d5db05f7dd74ff93a7312f49c9caf54",
+    "pr_url": null,
+    "files_changed": 314,
+    "mode": "local-aligned",
+    "additional_reviewed_untracked": [
+      "scripts/native-hash.ps1",
+      "scripts/run-release-build.ps1"
+    ]
+  },
+  "intent": "Implement the Rust performance route while keeping official kernel packages replaceable, authoritative logs readable without acceleration, original configuration intact, and native caches disposable. Review the active release candidate without deploying rejected experiments.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "testing",
+    "maintainability",
+    "project-standards",
+    "agent-native",
+    "learnings",
+    "security",
+    "performance",
+    "api-contract",
+    "data-migrations",
+    "reliability",
+    "adversarial",
+    "deployment-verification"
+  ],
+  "findings": [
+    {
+      "title": "Scoped searches scan every cached session",
+      "severity": "P2",
+      "file": "native-helper/src/index.rs",
+      "line": 426,
+      "confidence": 75,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Select separate scoped and global SQL statements. For Some(session), use WHERE d.session=?1 AND instr(d.folded,?2)>0 so the existing (session,seq,part) primary key can seek directly to that session. Preserve the current grouping, limit, revision snapshot, and global-search behavior. Verify equivalent results and indexed scoped access with multiple cached sessions.",
+      "why_it_matters": "The deployed desktop_session_search always supplies its current session, but the optional-scope OR predicate prevents an index seek. No-match scoped searches walk every cached document index entry, so searching one small session becomes progressively slower as unrelated histories accumulate. This defeats isolation of scoped search cost in the shared cache (up to 4096 sessions); the fix needs no new index or semantic change.",
+      "evidence": [
+        "git diff c139f1f -- native-helper/src/index.rs identifies this as a new file and line 426 as an added optional-scope predicate, so the behavior is introduced by this shipping change.",
+        "desktop/native/tools-plugin.mjs:18 passes exec.agent.session.id to index.search; desktop/native/session-text.mjs sends that ID as the search operation session.",
+        "On Python SQLite 3.45.3, an in-memory reproduction of the query and primary keys produces EXPLAIN QUERY PLAN: SCAN d USING INDEX sqlite_autoindex_documents_1. Replacing only (?1 IS NULL OR d.session=?1) with d.session=?1 produces SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?).",
+        "A bounded in-memory experiment with 100 sessions and 100 short documents each, querying absent in s050 with limit 21, returned identical empty results: current SQL executed 50358 SQLite VM instructions versus 653 for the direct scoped predicate. This measures query work, not production wall-clock latency. No repository, user, or persistent database was modified."
+      ],
+      "#": 1,
+      "reviewers": [
+        "performance"
+      ],
+      "validation": {
+        "validated": true,
+        "reason": "The scoped-search finding is a concrete introduced performance defect, not merely the intentional bounded substring scan. A substring search must examine the selected session's text, but the optional-scope OR causes traversal of unrelated cached sessions too. The shipping tool always supplies its current session, and cache limits allow 4096 sessions and 1 GiB. Separating scoped SQL removes avoidable cache-wide work without changing substring semantics, snapshot revision checks or the schema.",
+        "evidence": [
+          "Independently extracted the exact SQL from native-helper/src/index.rs and reproduced its table definitions in an in-memory Python SQLite 3.45.3 database with 100 sessions and 100 documents each; no repository files or persistent database were modified.",
+          "For the same no-match query scoped to s050, current SQL returned no rows and EXPLAIN QUERY PLAN reported SCAN d USING INDEX sqlite_autoindex_documents_1; it executed 50358 VM instructions. Changing only the optional-scope OR to d.session=?1 returned the same result, reported SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?), and executed 652 VM instructions.",
+          "native-helper/Cargo.toml selects rusqlite bundled SQLite; Cargo.lock pins libsqlite3-sys 0.30.1. Its installed sqlite3/sqlite3.c defines SQLITE_VERSION 3.46.0 at line 462.",
+          "Inspected the exact bundled SQLite amalgamation's exprAnalyzeOrTerm at lines 160834-160869 and 160909-160967: usable OR access requires all disjuncts to be indexable for the same table, intersects their table masks, and requires equality terms for OR-to-IN conversion. The parameter-only ?1 IS NULL disjunct is not a document-column constraint. The multi-index OR loop at lines 166687-166689 requires that resulting indexable mask. This supports the same planner limitation in the shipped dependency.",
+          "desktop/native/tools-plugin.mjs passes exec.agent.session.id into SessionTextIndex.search, and desktop/native/session-text.mjs includes that session ID in the helper search request. The all-session path exists but is not the shipping tool's normal use."
+        ],
+        "verification_boundary": "VM counts and plans were executed with system SQLite 3.45.3; bundled SQLite 3.46.0 was inspected at source level, not executed in a new harness. This is query-work evidence, not a production wall-clock benchmark. A targeted query-plan check on the bundled version is appropriate when implementing the fix."
+      }
+    }
+  ],
+  "actionable_findings": [
+    {
+      "title": "Scoped searches scan every cached session",
+      "severity": "P2",
+      "file": "native-helper/src/index.rs",
+      "line": 426,
+      "confidence": 75,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Select separate scoped and global SQL statements. For Some(session), use WHERE d.session=?1 AND instr(d.folded,?2)>0 so the existing (session,seq,part) primary key can seek directly to that session. Preserve the current grouping, limit, revision snapshot, and global-search behavior. Verify equivalent results and indexed scoped access with multiple cached sessions.",
+      "why_it_matters": "The deployed desktop_session_search always supplies its current session, but the optional-scope OR predicate prevents an index seek. No-match scoped searches walk every cached document index entry, so searching one small session becomes progressively slower as unrelated histories accumulate. This defeats isolation of scoped search cost in the shared cache (up to 4096 sessions); the fix needs no new index or semantic change.",
+      "evidence": [
+        "git diff c139f1f -- native-helper/src/index.rs identifies this as a new file and line 426 as an added optional-scope predicate, so the behavior is introduced by this shipping change.",
+        "desktop/native/tools-plugin.mjs:18 passes exec.agent.session.id to index.search; desktop/native/session-text.mjs sends that ID as the search operation session.",
+        "On Python SQLite 3.45.3, an in-memory reproduction of the query and primary keys produces EXPLAIN QUERY PLAN: SCAN d USING INDEX sqlite_autoindex_documents_1. Replacing only (?1 IS NULL OR d.session=?1) with d.session=?1 produces SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?).",
+        "A bounded in-memory experiment with 100 sessions and 100 short documents each, querying absent in s050 with limit 21, returned identical empty results: current SQL executed 50358 SQLite VM instructions versus 653 for the direct scoped predicate. This measures query work, not production wall-clock latency. No repository, user, or persistent database was modified."
+      ],
+      "#": 1,
+      "reviewers": [
+        "performance"
+      ],
+      "validation": {
+        "validated": true,
+        "reason": "The scoped-search finding is a concrete introduced performance defect, not merely the intentional bounded substring scan. A substring search must examine the selected session's text, but the optional-scope OR causes traversal of unrelated cached sessions too. The shipping tool always supplies its current session, and cache limits allow 4096 sessions and 1 GiB. Separating scoped SQL removes avoidable cache-wide work without changing substring semantics, snapshot revision checks or the schema.",
+        "evidence": [
+          "Independently extracted the exact SQL from native-helper/src/index.rs and reproduced its table definitions in an in-memory Python SQLite 3.45.3 database with 100 sessions and 100 documents each; no repository files or persistent database were modified.",
+          "For the same no-match query scoped to s050, current SQL returned no rows and EXPLAIN QUERY PLAN reported SCAN d USING INDEX sqlite_autoindex_documents_1; it executed 50358 VM instructions. Changing only the optional-scope OR to d.session=?1 returned the same result, reported SEARCH d USING INDEX sqlite_autoindex_documents_1 (session=?), and executed 652 VM instructions.",
+          "native-helper/Cargo.toml selects rusqlite bundled SQLite; Cargo.lock pins libsqlite3-sys 0.30.1. Its installed sqlite3/sqlite3.c defines SQLITE_VERSION 3.46.0 at line 462.",
+          "Inspected the exact bundled SQLite amalgamation's exprAnalyzeOrTerm at lines 160834-160869 and 160909-160967: usable OR access requires all disjuncts to be indexable for the same table, intersects their table masks, and requires equality terms for OR-to-IN conversion. The parameter-only ?1 IS NULL disjunct is not a document-column constraint. The multi-index OR loop at lines 166687-166689 requires that resulting indexable mask. This supports the same planner limitation in the shipped dependency.",
+          "desktop/native/tools-plugin.mjs passes exec.agent.session.id into SessionTextIndex.search, and desktop/native/session-text.mjs includes that session ID in the helper search request. The all-session path exists but is not the shipping tool's normal use."
+        ],
+        "verification_boundary": "VM counts and plans were executed with system SQLite 3.45.3; bundled SQLite 3.46.0 was inspected at source level, not executed in a new harness. This is query-work evidence, not a production wall-clock benchmark. A targeted query-plan check on the bundled version is appropriate when implementing the fix."
+      }
+    }
+  ],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan_source": "explicit",
+    "path": "docs/performance/IMPLEMENTATION.md",
+    "units": [
+      {
+        "unit": "Baseline and cache policy",
+        "status": "met",
+        "evidence": "Cache 1/2/5 measurements and rejected regressions documented; original default retained. Final artifact measurements remain release evidence, not an omitted implementation."
+      },
+      {
+        "unit": "Rust helper",
+        "status": "met",
+        "evidence": "Bounded streaming files, independent SQLite, incremental transactions, quotas/chunks/LRU, and cancellation/failure tests implemented; review findings qualify correctness."
+      },
+      {
+        "unit": "Desktop bridge",
+        "status": "met",
+        "evidence": "Lazy child, bounded IPC, close/timeout/restart, version-gated fallback implemented; Node integration tests."
+      },
+      {
+        "unit": "Plugin integration",
+        "status": "met",
+        "evidence": "desktop tools plugin uses SessionTextIndex; native persistence plugin active via managed overlay; three Advisor incremental observer files ship. Rejected side-panel experiment intentionally excluded."
+      },
+      {
+        "unit": "Session read path",
+        "status": "met",
+        "evidence": "Version-gated public loadStored subclass uses official decodeStorageRecord/decodeSeqRanges; before/after revisions and identity checks; stock repair fallback retained; cancellation differential tests."
+      },
+      {
+        "unit": "Packaging and deployment",
+        "status": "partially addressed",
+        "evidence": "Native build manifest, Tauri bundles, deployment and rollback implemented; nine recovery tests passed per caller. Loaded-image rename finding resolved. Final package and installation evidence is pending caller verification."
+      },
+      {
+        "unit": "Whole-route verification",
+        "status": "partially addressed",
+        "evidence": "Native/stock correctness, isolated CLI and WebSocket integration, and benchmark harnesses implemented. Final package measurements, real installation and actual UI latency remain explicitly pending; this review does not establish those outcomes."
+      }
+    ],
+    "intentional_deferrals": [
+      "True disk-backed history pagination needs an official range-source contract; public resume path still materializes events."
+    ],
+    "notes": [
+      "IMPLEMENTATION.md status rows were refreshed during this continuation and source implementation is reflected.",
+      "Pending build/install/measurement evidence is caller-owned release work, not a newly inferred missing-code finding.",
+      "Whole-route completion must not be claimed until pending release evidence is recorded."
+    ]
+  },
+  "learnings": [
+    {
+      "source": "docs/performance/PROGRESS.md:14",
+      "type": "documented-experiment",
+      "summary": "Reduced cache capacity regressed rotating-history p95; preserve original cache default and reject the side-panel experiment."
+    },
+    {
+      "source": "docs/performance/PROGRESS.md:16-20",
+      "type": "evidence-boundary",
+      "summary": "Keep initial index cost separate from reused-index results; measurements from an earlier helper and uncontrolled disk cache do not establish final package or UI performance."
+    }
+  ],
+  "agent_native_gaps": [],
+  "deployment_notes": [
+    {
+      "reviewer": "deployment-verification",
+      "notes": {
+        "status": "Code review found no additional concrete deployment defects; release acceptance remains conditional on the pending build and installation evidence.",
+        "reviewed": [
+          "build-native.ps1 builds both locked Cargo manifests, copies the helper and Node addon, then hashes their bytes into native/manifest.json using native-hash.ps1.",
+          "run-release-build.ps1 records native Tauri exit status in target/release-build-result.json; ensure the root target directory exists before launching this wrapper.",
+          "Tauri resources include desktop/native and native, and desktop package/config versions both read 0.2.5. verify-desktop-binary.ps1 validates ProductVersion and outputs SHA256.",
+          "deploy-performance.py checks native and Advisor payload hashes, guards the verified kernel and Advisor version, validates destination containment, backs up previous bytes and installs the desktop executable last.",
+          "The Advisor deployment manifest names exactly index.js, observer.js and turn-tracker.js; the rejected side-panel experiment is excluded.",
+          "Install and rollback image-rename intent is journaled before rename. Recovery validates the expected sibling name, roots and SHA256 before restoring. The nine reported passing deployment tests were inspected, not rerun."
+        ],
+        "checklist": [
+          "Record the exact reviewed source revision and working-tree state, require release-build-result.json exitCode=0, and preserve full build output.",
+          "Verify the executable ProductVersion is 0.2.5 and record its SHA256; match bundled native payload hashes to native/manifest.json and verify expected adapter resources exist in the bundle.",
+          "Run deploy-performance.py without --apply and preserve its concrete target list before the authorized installation step.",
+          "After apply, require manifest status=applied and verify each target against afterSha256; preserve the rollback directory.",
+          "After a normal desktop restart, confirm the actual executable path/version, native persistence activation, session search behavior and helper disposal using the parent runtime checks.",
+          "Verify native-disabled and unsupported-kernel paths retain official session access. Compare original session data/config using the parent baseline evidence.",
+          "Review native cache integrity using the queries in data-migrations.json when needed; never run migration or cleanup against authoritative logs."
+        ],
+        "rollback": [
+          "Use scripts/deploy-performance.py --install <same-install-root> --plugin <same-plugin-root> --rollback <owned-backup-manifest.json>.",
+          "Require manifest status=rolled-back and confirm all restored targets equal beforeSha256, with originally absent files absent.",
+          "If interruption occurs, rerun rollback with the same manifest. Do not remove retained images or alter journal entries to bypass ownership/hash failures.",
+          "A currently loaded newly installed addon or executable may keep its running process on the new implementation until normal exit. Verify restored behavior only after normal restart; do not stop the user's process as part of this review.",
+          "Cache schema rollback is unnecessary for official operation because the cache is disposable and original logs are not rewritten."
+        ]
+      }
+    },
+    {
+      "reviewer": "data-migrations",
+      "notes": {
+        "reviewed": [
+          "native-helper/src/index.rs opens only desktop-text-v1.sqlite under the independently owned cache directory; runtime.mjs selects DSH_HOME/cache/desktop-native.",
+          "Legacy rows map session, seq, text and folded unchanged, with part=0 and preview=NULL. BEGIN IMMEDIATE covers rename, copy, drop, default-backed quota columns, backfill and LRU index creation; migration errors roll back.",
+          "Cache eviction and suffix replacement commit atomically with revision comparison. Search revision validation and result selection share one SQLite snapshot, including empty results.",
+          "Existing migration, quota, disk-full and two-helper tests were inspected; previously reported passing tests were not rerun."
+        ],
+        "verification_queries": [
+          "PRAGMA user_version;",
+          "PRAGMA quick_check;",
+          "PRAGMA table_info(documents);",
+          "PRAGMA table_info(sessions);",
+          "SELECT d.session FROM documents d LEFT JOIN sessions s USING(session) WHERE s.session IS NULL LIMIT 1;",
+          "SELECT s.session FROM sessions s WHERE s.documents <> (SELECT COUNT(DISTINCT seq) FROM documents d WHERE d.session=s.session) LIMIT 1;",
+          "SELECT session,seq FROM documents GROUP BY session,seq HAVING MIN(part)<>0 OR MAX(part)+1<>COUNT(*) LIMIT 1;"
+        ],
+        "query_caveat": "Run optional integrity queries only against the derived cache; quick_check should return ok and invariant queries should return no rows. Do not mutate or migrate official logs or official index databases."
+      }
+    }
+  ],
+  "residual_risks": [
+    "Native activation is deliberately fail-closed on platform, version, or artifact mismatch; in that state the desktop_session_search tool is absent even though official session functionality remains available. This is an operational capability boundary rather than a parity defect in the shipped compatible path.",
+    "The activation gate pins the CLI plus session and persistence packages, while desktop-native-tools also imports dsh-session-query and cordis APIs without checking their package versions. The current locked 0.1.2-rc.1 bundle provides the expected APIs, but a selectively modified installation under the same CLI version would rely on fail-safe plugin load behavior rather than an explicit compatibility gate.",
+    "Kernel compatibility version 0.1.2-rc.1 is repeated independently in desktop/native/activation.js, persistence.mjs, session-text.mjs, and scripts/deploy-performance.py. The checks currently agree, but an official-kernel upgrade requires coordinated edits across activation, fallback, and deployment paths; a shared generated compatibility manifest would reduce drift.",
+    "The native helper protocol number is duplicated between Rust and two JavaScript transports. Current values all equal 1, but there is no single generated contract or mandatory handshake in NativeClient, so a future partial upgrade could fail only after the first real operation.",
+    "Successful loaded-image replacement retains `.before-native-*` sibling binaries with no cleanup path; this is bounded per deployment but can accumulate across repeated upgrades.",
+    "Rollback trusts any manifest located beneath install/repair-checks; an accidentally selected or locally modified manifest can operate on allowed install/plugin targets, although hash checks limit ordinary stale-manifest damage.",
+    "The document-key migration is forward-only inside disposable desktop-native cache. Returning to a helper that expects the legacy document shape may require retiring that derived cache with all helper processes stopped; authoritative session logs remain untouched and official fallback remains available.",
+    "Replacing a loaded Windows executable changes the next launch; the current process continues using its retained image. Activation and rollback therefore require verification after a normal restart, without terminating a user session.",
+    "Rollback intentionally refuses foreign edits and tampered backups. Preserve the manifest, byte backups and journal-owned retained images until recovery and post-restart verification are complete.",
+    "The migration journal supports process interruption, but its writes are not explicitly fsync-backed; sudden power loss durability was not established by the inspected interruption tests."
+  ],
+  "testing_gaps": [
+    "The reviewed tests exercise traversal and request/slice bounds, but do not cover Windows junction/reparse-point containment or a second-session argument attempting to override desktop_session_search's caller-derived scope. Static inspection found both boundaries enforced; this leaf pass did not execute additional tests.",
+    "The scoped-query finding is independently validated, but its fix should include a targeted query-plan/result check against bundled SQLite 3.46.0; this review executed system SQLite 3.45.3 and inspected the bundled planner source.",
+    "Final source-to-built-artifact hashes, NSIS bundle inspection, actual installation and post-restart runtime evidence remain pending with the parent release workflow. These are release evidence gates, not asserted code defects."
+  ],
+  "coverage": {
+    "continuation": "Reused completed reviewer artifacts from the interrupted run. Completed only remaining performance, learnings, data-migrations and deployment-verification roles; no completed reviewer was rerun.",
+    "selected_reviewers": 13,
+    "completed_reviewers": 13,
+    "locally_executed_role": "learnings: no docs/solutions directory; inspected existing performance experiment notes",
+    "conditional_reasons": {
+      "data-migrations": "Inline legacy document-key/cache schema migration",
+      "adversarial": "Large mutation and external integration diff",
+      "security": "Native request inputs and path/scope containment",
+      "reliability": "Cancellation, fallback and rollback",
+      "performance": "SQLite caching/search and streamed hash packaging",
+      "deployment-verification": "Disposable cache migration plus journaled Windows loaded-image replacement",
+      "api-contract": "Native operations and versioned official adapters"
+    },
+    "failed_reviewers": [],
+    "malformed_drops": 0,
+    "suppressed_by_anchor": {
+      "25": 0,
+      "0": 0,
+      "50": 0
+    },
+    "mode_aware_demotions": 0,
+    "validators": {
+      "dispatched_total": 2,
+      "confirmed": 1,
+      "rejected": 1,
+      "infrastructure_failures": 0,
+      "over_budget_drops": 0,
+      "rejection_reasons": [
+        "Native add-on timeout finding lacked a concrete indefinitely stalled regular-file scenario and overlooked process-tree shutdown escalation; see validate-timeout.json."
+      ],
+      "confirmed_artifact": "validate-performance.json",
+      "method": "Independent per-finding review; exact SQL reproduction on SQLite 3.45.3 and bundled SQLite 3.46.0 planner source inspection."
+    },
+    "resolved_findings": [
+      {
+        "title": "Validate the indexed revision even when scoped search returns no hits",
+        "status": "resolved-by-caller",
+        "evidence": "Same-snapshot revision guard and two-helper eviction/replacement tests; resolution-check.json and caller passing tests."
+      },
+      {
+        "title": "Interrupted loaded-image rename leaves launcher missing and rollback blocked",
+        "status": "resolved-by-caller",
+        "evidence": "Install/rollback rename intents and owned-hash recovery, inspected in resolution-check.json; nine deployment tests passed per caller."
+      },
+      {
+        "title": "Generated Python bytecode is tracked",
+        "status": "resolved-by-caller",
+        "evidence": "Current git index contains no scripts Python bytecode; .gitignore lines 2-3 exclude __pycache__/ and *.py[cod]."
+      },
+      {
+        "title": "Authoritative implementation tracker is stale",
+        "status": "resolved-by-caller",
+        "evidence": "Current IMPLEMENTATION.md now states tested cache/bridge/plugins/read path and preserves pending package/live verification."
+      }
+    ],
+    "verification_boundary": [
+      "No code edits, commits, pushes, branch changes or deployment by this continuation.",
+      "Prior passed tests reused: two-helper eviction/replacement, nine deployment recovery cases including running-image replacement, and 23 shell tests (execution reported by caller).",
+      "No long benchmarks or full-suite reruns; bounded in-memory query-work reproductions only.",
+      "Final build/install/hash/runtime and actual UI performance evidence is pending, not certified by this review."
+    ],
+    "excluded": [
+      "Untracked plugins/dsh-side-panel-performance: deliberately rejected performance experiment.",
+      "Advisor copied dependencies/original fixtures are not active production changes; only deploy-manifest three files ship."
+    ],
+    "artifacts_reused": [
+      "correctness.json",
+      "reliability.json",
+      "adversarial.json",
+      "project-standards.json",
+      "security.json",
+      "testing.json",
+      "maintainability.json",
+      "agent-native.json",
+      "api-contract.json",
+      "validate-timeout.json",
+      "resolution-check.json"
+    ]
+  },
+  "artifact_path": "C:\\tmp\\compound-engineering\\ce-code-review\\20260906-release-review",
+  "run_id": "20260906-release-review"
+}

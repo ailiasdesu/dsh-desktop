@@ -1,0 +1,1 @@
+{"mode":"official","processCold":true,"diskCacheControlled":false,"reads":[{"id":"perf-huge-0","label":"huge","ms":628.7591,"compressedBytes":70821643}],"memory":{"rss":516116480,"heapTotal":275509248,"heapUsed":178894744,"external":211153939,"arrayBuffers":208629684},"eventLoopDelay":{"p95Ms":596.639743,"maxMs":596.639743},"peakTotalPrivateMiB":522.71875}

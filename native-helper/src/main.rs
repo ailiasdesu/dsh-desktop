@@ -18,5 +18,10 @@ fn run() -> Result<(), String> {
         return Err("unexpected arguments".into());
     }
     let mut helper = Helper::open(&cache)?;
-    serve(io::stdin().lock(), io::stdout().lock(), &mut helper)
+    // Coalesce binary frame headers and payload into one pipe write.
+    serve(
+        io::stdin().lock(),
+        io::BufWriter::with_capacity(256 * 1024, io::stdout().lock()),
+        &mut helper,
+    )
 }

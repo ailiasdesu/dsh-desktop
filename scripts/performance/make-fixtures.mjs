@@ -4,17 +4,19 @@ import {createHash} from 'node:crypto';
 import {backend, moduleOf} from './official.mjs';
 
 const root = resolve(process.argv[2] ?? 'target/performance-fixtures');
+const entropy=process.argv.includes('--entropy');
 await mkdir(root, {recursive:true});
 const marker = join(root, 'manifest.json');
 try { await stat(marker); throw new Error('Fixtures already exist; reuse the manifest or select a new fixture root'); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 const {Session} = await moduleOf('dsh-session');
 const b = await backend(join(root, 'sessions'));
-const manifest = {kind:'dsh-performance-synthetic-v1', sessions:[], createdAt:new Date().toISOString()};
+const manifest = {kind:'dsh-performance-synthetic-v1', entropy, sessions:[], createdAt:new Date().toISOString()};
 try {
   // Six 16 MiB histories exercise the default five-entry retention policy.
   // Small/medium variants are retained for subsequent tool and page benchmarks.
-  for (const [label, turns, chars, copies] of [['small',16,512,1],['medium',256,4096,1],['large',1024,16384,6]]) {
+  const shapes=process.argv.includes('--huge')?[['huge',4096,32768,1]]:[['small',16,512,1],['medium',256,4096,1],['large',1024,16384,6]];
+  for (const [label, turns, chars, copies] of shapes) {
     for (let copy=0; copy<copies; copy++) {
       const id=`perf-${label}-${copy}`;
       const session=Session.create(id);
@@ -22,7 +24,8 @@ try {
       let bytes=0;
       for (let i=0;i<turns;i++) {
         const block=createHash('sha256').update(`${id}:${i}`).digest('hex');
-        const content=`fixture ${id} turn ${i} `+block.repeat(Math.ceil(chars/block.length)).slice(0,chars);
+        const payload=entropy?Array.from({length:Math.ceil(chars/64)},(_,n)=>createHash('sha256').update(`${id}:${i}:${n}`).digest('hex')).join('').slice(0,chars):block.repeat(Math.ceil(chars/block.length)).slice(0,chars);
+        const content=`fixture ${id} turn ${i} `+payload;
         session.append('turn/start',{turn:i+1});
         session.append('user/message',{content:[{type:'text',text:content}],source:{kind:'user'}},{surfaceOp:'append'});
         session.append('turn/end',{turn:i+1,reason:{kind:'completed'}});

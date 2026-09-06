@@ -1,0 +1,9 @@
+{
+  "reviewer": "agent-native",
+  "findings": [],
+  "agent_native_gaps": [],
+  "residual_risks": [
+    "Native activation is deliberately fail-closed on platform, version, or artifact mismatch; in that state the desktop_session_search tool is absent even though official session functionality remains available. This is an operational capability boundary rather than a parity defect in the shipped compatible path."
+  ],
+  "testing_gaps": []
+}

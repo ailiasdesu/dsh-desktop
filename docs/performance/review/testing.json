@@ -1,0 +1,8 @@
+{
+  "reviewer": "testing",
+  "findings": [],
+  "residual_risks": [
+    "The Windows loaded-image replacement test is platform-gated and depends on the built native helper artifact, so its release assurance still depends on running the targeted deployment test on the final Windows build host."
+  ],
+  "testing_gaps": []
+}

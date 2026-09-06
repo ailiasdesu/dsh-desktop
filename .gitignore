@@ -1,4 +1,9 @@
 target/
+__pycache__/
+*.py[cod]
+/native/
+/kernel.native-stage/
+/kernel.pre-native-*/
 node_modules/
 kernel/
 runtime/

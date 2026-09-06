@@ -48,3 +48,21 @@ test('live appends are incremental and unknown kernel bypasses the helper',async
   const next=new SessionTextIndex({...options,kernelVersion:'0.1.3-alpha.1'});
   assert.equal((await next.search('live','first')).engine,'official-fallback');
 });
+
+for(const change of ['evict','replace'])test(`concurrent cache ${change} with no hits falls back to authoritative history`,async t=>{
+  const {b,index,client}=await fixture(t);const session=b.ctx.sessions.create('race');turn(session,'find-me');
+  assert.equal((await index.search('race','find-me')).hits.length,1);
+  const competitor=new NativeClient({executable:client.executable,cache:client.cache});
+  try {
+  const original=client.request.bind(client);let changed=false;
+  client.request=async(op,opts)=>{
+    if(op.op==='search'&&!changed){
+      changed=true;
+      if(change==='evict')await competitor.request({op:'index_delete',session:'race'});
+      else await competitor.importDocuments({session:'race',revision:'foreign',documents:[{seq:1,text:'unrelated'}]});
+    }
+    return original(op,opts);
+  };
+  const result=await index.search('race','find-me');assert.equal(result.hits.length,1);assert.equal(result.engine,'official-fallback');
+  }finally{await competitor.close();}
+});

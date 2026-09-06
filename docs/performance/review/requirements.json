@@ -1,0 +1,49 @@
+{
+  "plan_source": "explicit",
+  "path": "docs/performance/IMPLEMENTATION.md",
+  "units": [
+    {
+      "unit": "Baseline and cache policy",
+      "status": "met",
+      "evidence": "Cache 1/2/5 measurements and rejected regressions documented; original default retained. Final artifact measurements remain release evidence, not an omitted implementation."
+    },
+    {
+      "unit": "Rust helper",
+      "status": "met",
+      "evidence": "Bounded streaming files, independent SQLite, incremental transactions, quotas/chunks/LRU, and cancellation/failure tests implemented; review findings qualify correctness."
+    },
+    {
+      "unit": "Desktop bridge",
+      "status": "met",
+      "evidence": "Lazy child, bounded IPC, close/timeout/restart, version-gated fallback implemented; Node integration tests."
+    },
+    {
+      "unit": "Plugin integration",
+      "status": "met",
+      "evidence": "desktop tools plugin uses SessionTextIndex; native persistence plugin active via managed overlay; three Advisor incremental observer files ship. Rejected side-panel experiment intentionally excluded."
+    },
+    {
+      "unit": "Session read path",
+      "status": "met",
+      "evidence": "Version-gated public loadStored subclass uses official decodeStorageRecord/decodeSeqRanges; before/after revisions and identity checks; stock repair fallback retained; cancellation differential tests."
+    },
+    {
+      "unit": "Packaging and deployment",
+      "status": "partially addressed",
+      "evidence": "Native build manifest, Tauri bundles, deployment and rollback implemented; nine recovery tests passed per caller. Loaded-image rename finding resolved. Final package and installation evidence is pending caller verification."
+    },
+    {
+      "unit": "Whole-route verification",
+      "status": "partially addressed",
+      "evidence": "Native/stock correctness, isolated CLI and WebSocket integration, and benchmark harnesses implemented. Final package measurements, real installation and actual UI latency remain explicitly pending; this review does not establish those outcomes."
+    }
+  ],
+  "intentional_deferrals": [
+    "True disk-backed history pagination needs an official range-source contract; public resume path still materializes events."
+  ],
+  "notes": [
+    "IMPLEMENTATION.md status rows were refreshed during this continuation and source implementation is reflected.",
+    "Pending build/install/measurement evidence is caller-owned release work, not a newly inferred missing-code finding.",
+    "Whole-route completion must not be claimed until pending release evidence is recorded."
+  ]
+}
