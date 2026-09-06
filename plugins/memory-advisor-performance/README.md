@@ -7,7 +7,7 @@
 - lib/advisor/observer.js：保留原 handleEvent(sessionId, events, event) 数组接口；删除未被消费的 fingerprint；接入现代 Session 入口。
 - lib/advisor/turn-tracker.js：基于公开 seq/eventAt 的增量 turn 分类。
 
-其他 lib/ 与 original/ 文件仅用于隔离执行上游测试和原版对照，不应覆盖安装。没有修改真实安装件、用户数据、UI/CSS、官方包或调用模型。安装前核对 expectedOriginalSha256，遇到不匹配重新审查；不要盲目覆盖插件新版。
+其他 lib/ 与 original/ 文件仅用于隔离执行上游测试和原版对照，不应覆盖安装。本机已通过 `scripts/deploy-performance.py` 部署清单中的三个文件，原始备份保留；用户数据、UI/CSS 和官方包未修改。安装脚本核对 expectedOriginalSha256，遇到不匹配重新审查；不要盲目覆盖插件新版。具体安装结果见仓库的 `docs/performance/RELEASE.md`。
 
 ## 正确性
 
