@@ -1,0 +1,32 @@
+✔ queued next is exclusive; close is idempotent and interrupts work (85.8153ms)
+✔ external buffers retain their bytes through subsequent reads and GC (314.7427ms)
+✔ final frame callback cancellation rejects (sync) (57.6854ms)
+✔ final frame callback cancellation rejects (async) (30.0623ms)
+✔ timeout during final callback rejects and transport closes cleanly (91.4907ms)
+✔ real helper lazy start, Unicode files, bounded import and incremental replacement (2592.5746ms)
+✔ idle process exits and committed index is reusable after lazy restart (321.9797ms)
+✔ invalid revision, oversized frame and aborted requests do not publish partial state (214.0471ms)
+✔ startup failure rejects promptly and close prevents restart (6.727ms)
+✔ in-flight abort ends a native operation and leaves the client restartable (107.1207ms)
+✔ multi-megabyte documents retain boundary hits once with original Unicode preview (717.4944ms)
+✔ managed overlay preserves configuration and leaves unsupported kernels on original backend (561.1208ms)
+✔ public loadStored and borrowSession use native reads with independent graphs (2034.8502ms)
+✔ multi-frame Unicode lines and packed rows use official codecs losslessly (201.5212ms)
+✔ header-only, seeded and unknown headers preserve official outcomes (217.7422ms)
+✔ malformed rows, seq gaps, incomplete frames and checksums fall back without repair writes (374.6459ms)
+✔ first frame with body, missing newline and duplicate IDs use official validation (158.9143ms)
+✔ missing helper, unknown kernel and caller cancellation preserve the official boundary (179.471ms)
+✔ all skippable frame magics and the unused descriptor bit preserve official refusal (448.5459ms)
+✔ replacement and append during native transfer never publish a stale revision (444.8283ms)
+✔ official persisted events, Unicode search, cache revision and helper failure fallback (3004.7382ms)
+✔ live appends are incremental and unknown kernel bypasses the helper (273.4868ms)
+✔ concurrent cache evict with no hits falls back to authoritative history (366.8893ms)
+✔ concurrent cache replace with no hits falls back to authoritative history (381.0433ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4464.4793

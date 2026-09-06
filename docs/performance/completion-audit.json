@@ -1,0 +1,153 @@
+{
+  "checkedAt": "2026-09-06T10:47:03.333307+00:00",
+  "conclusion": "Selected compatible performance route implemented, installed and verified; rejected candidates and upstream-dependent integrations explicitly retained as limits.",
+  "sourceImplementationCommit": "7523723ac00eec6bbb3ab166a05c0ecaa234fb9b",
+  "desktopVersion": "0.2.5",
+  "kernelVersion": "0.1.2-rc.1",
+  "checks": [
+    {
+      "requirement": "Preserve replaceable official 0.1.2-rc.1 kernel and original storage ownership",
+      "status": "passed",
+      "evidence": "Version-gated public adapter; original decode, replay, writes and repairs retained; final-artifact-audit and differential tests."
+    },
+    {
+      "requirement": "Reduce large-history read cost and intermediate allocation",
+      "status": "passed",
+      "evidence": "Node-API bounded prefetch; history-final p95 653.93 to 470.56 ms; median sampled peak total private 522.72 to 356.43 MiB."
+    },
+    {
+      "requirement": "Avoid measured ordinary-history regression",
+      "status": "passed",
+      "evidence": "32 MiB compressed-log minimum; history-balanced-final p95 110.34 vs 110.32 ms. These are selected fixtures, not every possible workload."
+    },
+    {
+      "requirement": "Independent bounded searchable derived cache",
+      "status": "passed",
+      "evidence": "Revision-safe SQLite transactions, quotas, chunking, LRU and actual current-session tool; index-final 410.02 to 87.98 MiB total private peak; initial build is a separate cost."
+    },
+    {
+      "requirement": "Reduce active-turn plugin rescans without changing behavior",
+      "status": "passed",
+      "evidence": "Advisor incremental JavaScript retained as simpler solution; 136 original/optimized parity tests; observer-only benchmark."
+    },
+    {
+      "requirement": "Cancellation, malformed frames, version mismatch and helper failure",
+      "status": "passed",
+      "evidence": "24 Node tests, 31 Rust tests and four scoped-search integration regressions."
+    },
+    {
+      "requirement": "Installed backend behavior, official fallback and original adaptation regressions",
+      "status": "passed",
+      "evidence": "Installed mirror smoke and full isolated CLI/history WebSocket/tool/config checks; 21 compatibility tests and 45 hashes/syntax checks."
+    },
+    {
+      "requirement": "Package, deploy and recover without interrupting user",
+      "status": "passed",
+      "evidence": "Final NSIS bundle exit 0; 17 installed and backup hashes; nine deployment recovery tests; no forced user-process exit. Source EXE comparison explicitly accounts for three-byte Tauri bundle marker."
+    },
+    {
+      "requirement": "Review and fix confirmed findings",
+      "status": "passed",
+      "evidence": "Thirteen selected review roles completed; caller-resolutions records fixes and verification."
+    },
+    {
+      "requirement": "Evaluate prepared cache and side-panel candidates",
+      "status": "evaluated_not_shipped",
+      "evidence": "Reduced prepared cache and side-panel candidate regressed switching/rotation; original implementations retained."
+    },
+    {
+      "requirement": "File hash/slice capability and attachment integration",
+      "status": "primitive_verified_integration_deferred",
+      "evidence": "Rust primitives measured; no compatible public binary-stream/hash provider seam. Attachment UI unchanged."
+    },
+    {
+      "requirement": "True disk pagination and official session projection rewrite",
+      "status": "conditional_upstream_work",
+      "evidence": "0.1.2 requires complete event source; no public range-source seam. Original reducers retained; no incomplete history presented as resumable."
+    },
+    {
+      "requirement": "Whole UI and remote-model speed claims",
+      "status": "not_claimed",
+      "evidence": "No uniform end-to-end first-paint/interactive/live-model benchmark. Local data-path and observer figures must not be represented as whole-app gains."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "docs/performance/results/final-artifact-audit.json",
+      "bytes": 4848,
+      "sha256": "4ba67186683575f0106fe55bdf3ae2dcb073b17078b5940cd3431138d8152ca5"
+    },
+    {
+      "path": "docs/performance/results/final-node-tests.log",
+      "bytes": 2327,
+      "sha256": "b9d5c04db9d1cac9aaabb7997378a9afdb4826caf30aa137bc532598a88bf966"
+    },
+    {
+      "path": "docs/performance/results/final-rust-tests.log",
+      "bytes": 3848,
+      "sha256": "214a4591a06dc3e872f0f76436cc9107a564f4f012904b6222adbf2c3a365194"
+    },
+    {
+      "path": "docs/performance/results/final-search-tests.log",
+      "bytes": 494,
+      "sha256": "d533428aa8454b259f22fdd2020176839f6dfa308e11f2bbf8a4bbf04c4139a1"
+    },
+    {
+      "path": "docs/performance/results/final-deployment-tests.log",
+      "bytes": 112,
+      "sha256": "366512a1fcbb197e1fbf02afcb67024e200e1d1feeebf66835e2ed57434a7ad2"
+    },
+    {
+      "path": "docs/performance/results/final-installed-compat.log",
+      "bytes": 2010,
+      "sha256": "8369a09dd793edb57cedb8c2e1a7adb6824ad649067229eddb09c6989bfdf110"
+    },
+    {
+      "path": "docs/performance/results/installed-smoke.json",
+      "bytes": 240,
+      "sha256": "c05e0d6da3b570f17f6b722f89cffd222bff693629ce2eac1a04c361f3f68fe4"
+    },
+    {
+      "path": "docs/performance/results/installed-runtime/summary.json",
+      "bytes": 3254,
+      "sha256": "8103794fb5b88a83aac05477f49ff6e426ddbcc379c97f8324b0d7dc7b7c04f2"
+    },
+    {
+      "path": "docs/performance/results/history-final/summary.json",
+      "bytes": 466,
+      "sha256": "7adb2db86c14f61e249f28bc3bc4d5f255f447f242d4c6aba6c93608250193b2"
+    },
+    {
+      "path": "docs/performance/results/index-final/summary.json",
+      "bytes": 1521,
+      "sha256": "f8ef35d7758d26352a43d83915e0e4f7c907ca24259d57b7108e25ee7e10aa1c"
+    },
+    {
+      "path": "docs/performance/results/history-balanced-final/summary.json",
+      "bytes": 490,
+      "sha256": "d1a9e4ce6a8b86f6bb53cf4fdb08fbfb7a430adbba2da3c6fc334090c9084dd1"
+    },
+    {
+      "path": "plugins/memory-advisor-performance/results/all-tests.log",
+      "bytes": 13713,
+      "sha256": "c1ed66c1a3ae2ebeba508cec07aad6e4e72d8f9107c31a1235c20b4e88bfb585"
+    },
+    {
+      "path": "plugins/memory-advisor-performance/results/benchmark.json",
+      "bytes": 10890,
+      "sha256": "7fcdbe3017c0b89b3fe0cc7a1301533c2a9734fc5a92c141a21cc091707f3493"
+    },
+    {
+      "path": "docs/performance/review/caller-resolutions.json",
+      "bytes": 846,
+      "sha256": "e8645bb06537bef440f3e15aaf8799570d934f3a10a8b87917cc92f7dcdd2f1c"
+    }
+  ],
+  "installer": {
+    "path": "D:\\文件存放处\\code\\dsh desktop版 以及dsh插件制作\\dsh-desktop\\src-tauri\\target\\release\\bundle\\nsis\\DSH Desktop_0.2.5_x64-setup.exe",
+    "bytes": 55212607,
+    "sha256": "cb88757ef9d1e547ceb9eca22f95672fc157b4bca88c18476e2e27a781c80e35"
+  },
+  "activation": "No user process was forcibly stopped. New runtime becomes active on normal next launch.",
+  "scope": "Synthetic isolated data; no original user history migration/deletion; original plugin UI preserved; OpenBiliClaw excluded; no remote push/PR."
+}

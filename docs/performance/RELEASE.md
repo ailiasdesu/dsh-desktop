@@ -9,7 +9,7 @@
 - **Advisor**：正常事件流只处理增量，不再每回合复制/扫描完整历史；删除未被消费的全消息指纹计算。中途订阅或恢复缺失前缀仍补齐，legacy 行为和原 UI/CSS 保留。
 - **更新回退**：未验证的内核版本、缺少原生文件时保留官方后端；原生读取失败回到官方读取，取消保持取消。不会将跳过的坏帧或部分历史当作成功。
 
-程序文件已安装到 `C:/Users/34021/AppData/Local/DSH Desktop`。当前已打开的旧进程没有被强制结束；请在方便时从托盘选择“退出”，再打开 DSH Desktop，让新版本全部生效。
+程序文件已安装到 `C:/Users/34021/AppData/Local/DSH Desktop`。安装时没有强制结束原有进程；新版本在下次正常启动时全部生效。如果仍开着安装前的窗口，请在方便时从托盘选择“退出”，再打开 DSH Desktop。
 
 ## 最终测量
 
@@ -36,11 +36,13 @@ Advisor 大历史基准的峰值 RSS 为 461.56 → 165.42 MiB；它是隔离 ob
 - 使用已安装的模块，在完整隔离 DSH CLI 中验证了真实 history WebSocket 快照、原配置保留、当前会话搜索工具、官方回退和正常退出。见 `results/installed-runtime/summary.json`。
 - 原有 21 项适配回归通过，45 个修复文件的校验与 JavaScript 语法通过。
 - 完整审查的已确认问题均修复；审查原件及调用方处理记录见 `review/`。
+- 最终 NSIS 打包退出码为 0；17 个安装文件及原始备份重新校验通过。构建目录与已安装 EXE 仅有 Tauri 打包类型标记的 3 字节差异，其余字节一致；其余部署内容完全一致。见 `results/final-artifact-audit.json` 和 `completion-audit.json`。
 
 ## 有意保留的边界
 
 - 官方目前仍需要完整事件源。真正的磁盘分页历史接口在 0.1.2 中不存在，本次没有另写会话控制器，也不把只读预览冒充已恢复会话。
 - 标题清理和部分投影工作仍由官方 JavaScript 完成；原生读取不能消除它们，也不能加速远端模型自身的推理。
+- 完整 CLI/history WebSocket 已验证；本轮没有把前端首屏、全程可交互延迟或真实模型回合测成统一基准，因此不宣称整个应用提速 28% 或整机内存下降 32%。这些比例仅属于表中对应场景。
 - 侧栏预览缓存候选因轮换延迟和内存退化没有安装。原侧栏继续使用原实现，实验结果保留在 `plugins/dsh-side-panel-performance/bench/RESULTS.md`。
 - Rust 哈希/文件片段能力已构建和测量，但没有绕过官方 `ctx.fs` 契约硬接到附件模块；当前 provider 不提供原始字节流/原生 hash 注入点。它不是已完成的附件 UI 加速承诺。
 - 更新到其他内核版本会停用未验证的这层原生加速，重新验证后再启用。第三方插件升级也可能覆盖本地 Advisor 改动；安装脚本对原文件 SHA 不匹配会拒绝覆盖。
@@ -48,6 +50,8 @@ Advisor 大历史基准的峰值 RSS 为 461.56 → 165.42 MiB；它是隔离 ob
 ## 文件和回退
 
 安装包：`src-tauri/target/release/bundle/nsis/DSH Desktop_0.2.5_x64-setup.exe`。
+
+最终大小 55,212,607 字节；SHA-256：`cb88757ef9d1e547ceb9eca22f95672fc157b4bca88c18476e2e27a781c80e35`。该安装包包含桌面原生运行组件；已安装第三方 Advisor 的三文件优化由本地部署脚本和独立清单管理，不冒充官方插件更新。
 
 本次备份清单：`C:/Users/34021/AppData/Local/DSH Desktop/repair-checks/native-performance-backup-20260906T101747330484Z/manifest.json`。原始备份和两次校验/策略微调前的字节均保留。
 

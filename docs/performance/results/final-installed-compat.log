@@ -1,0 +1,30 @@
+✔ memory review counts completed user turns on the current Session API (1.0662ms)
+✔ workflow retains usage, evidence, final text and completion on snapshot API (5.4936ms)
+✔ apply_patch resolves an FsTarget in the caller workspace (4.7494ms)
+✔ checkpoint captures and restores through the current filesystem API (1.3453ms)
+✔ legacy runtime forwards the official store implementations unchanged (2.9305ms)
+✔ progress dock renders real chat state with current lifecycle-only slot props (6.9322ms)
+✔ pending summary includes unopened catalog children without double counting (4.8209ms)
+✔ paste dock receives its controller through a stable component closure (10.9487ms)
+✔ workspace adapter refreshes cached headers and archive state, and rejects unknown versions (11.8903ms)
+✔ cache invalidation uses the shared official per-record domain (0.9857ms)
+✔ synthetic multi-frame migration preserves history and rolls back without overwrite (74.0433ms)
+✔ original advisor stylesheet survives overlapping plugin reload (2.1985ms)
+✔ original notify stylesheet survives overlapping plugin reload (1.748ms)
+✔ original memory-evolve stylesheet survives overlapping plugin reload (2.6268ms)
+✔ fake ranges are narrow and public DNS answers never admit private destinations (9.1673ms)
+✔ literal loopback remains blocked without querying an external resolver (2.9743ms)
+✔ manager lists sessions through the current sessions service (4.4613ms)
+✔ queued migrations use the supplied executor and preserve failed entries (1.2858ms)
+✔ current kernel Session can attach without an obsolete events property (3.5669ms)
+✔ restored skill still activates tools through snapshot API (0.6078ms)
+✔ restored skill still activates tools through legacy events (0.234ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 306.005
+PASS: kernel 0.1.2-rc.1; 45 patched files match the manifest and JavaScript syntax passes.

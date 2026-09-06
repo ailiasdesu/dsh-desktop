@@ -1,0 +1,12 @@
+✔ official persisted events, Unicode search, cache revision and helper failure fallback (1012.758ms)
+✔ live appends are incremental and unknown kernel bypasses the helper (200.9443ms)
+✔ concurrent cache evict with no hits falls back to authoritative history (213.0012ms)
+✔ concurrent cache replace with no hits falls back to authoritative history (254.3741ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1991.0756

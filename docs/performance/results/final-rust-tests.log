@@ -1,0 +1,74 @@
+   Compiling dsh-native-helper v0.1.0 (D:\文件存放处\code\dsh desktop版 以及dsh插件制作\dsh-desktop\native-helper)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.15s
+     Running unittests src\lib.rs (native-helper\target\debug\deps\dsh_native_helper-3dd2b47ec38bebbd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (native-helper\target\debug\deps\dsh_native_helper-5d434194bcf9402b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\cache_limits.rs (native-helper\target\debug\deps\cache_limits-e29a86e28e91549f.exe)
+
+running 10 tests
+test invalid_cache_policy_fails_closed_without_deleting_existing_data ... ok
+test commit_rechecks_policy_and_incremental_retained_bytes_atomically ... ok
+test lru_evicts_whole_sessions_and_queries_refresh_recency ... ok
+test byte_quota_evicts_old_data_and_counts_unicode_and_empty_rows ... ok
+test quota_failure_preserves_revision_and_other_sessions_then_can_abort ... ok
+test failed_insert_rolls_back_evictions_and_original_replacement ... ok
+test old_v1_database_migrates_without_replacing_authoritative_revision ... ok
+test concurrent_replacement_or_eviction_cannot_commit_stale_import ... ok
+test pinned_reader_bounds_wal_growth_and_retry_after_release_succeeds ... ok
+test import_above_old_32_mib_limit_is_disk_backed_and_batches_remain_bounded ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.32s
+
+     Running tests\document_chunks.rs (native-helper\target\debug\deps\document_chunks-bfe3e49cec02c959.exe)
+
+running 8 tests
+test preview_bytes_are_charged_and_oversized_preview_is_rejected ... ok
+test overlap_matches_cross_boundary_once_and_preserves_original_preview ... ok
+test gaps_duplicates_and_nonzero_first_parts_fail_without_partial_batch ... ok
+test incremental_quota_charges_retained_preview_and_all_tail_parts ... ok
+test incomplete_chunk_import_preserves_old_index_and_atomic_retry ... ok
+test incremental_replace_removes_all_old_tail_parts ... ok
+test cache_with_existing_quota_metadata_migrates_legacy_primary_key ... ok
+test large_logical_document_spans_bounded_batches_and_reopens ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests\protocol.rs (native-helper\target\debug\deps\protocol-b32767095affb600.exe)
+
+running 10 tests
+test protocol_roundtrip_and_version_refusal ... ok
+test bounded_and_truncated_framing_fail_closed ... ok
+test hello_and_file_operations_do_not_open_the_index_database ... ok
+test file_hash_empty_unicode_and_scope ... ok
+test future_database_schema_is_refused_without_overwriting_it ... ok
+test import_rejects_out_of_order_without_partial_batch ... ok
+test concurrent_cache_writer_cannot_publish_over_a_changed_revision ... ok
+test repeat_queries_unicode_literals_and_global_limit ... ok
+test incremental_revision_checks_and_suffix_replacement ... ok
+test replacement_is_atomic_and_survives_restart ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running tests\stream.rs (native-helper\target\debug\deps\stream-b49e94815a0f07da.exe)
+
+running 3 tests
+test budgets_and_empty_input_refuse_without_partial_success ... ok
+test incomplete_or_corrupt_frames_never_report_success ... ok
+test multiframe_chunks_preserve_all_bytes_and_bound_output ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+   Doc-tests dsh_native_helper
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

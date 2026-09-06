@@ -1,0 +1,100 @@
+{
+  "checkedAt": "2026-09-06T10:44:28.094633+00:00",
+  "status": "passed",
+  "sourceCommit": "7523723ac00eec6bbb3ab166a05c0ecaa234fb9b",
+  "coreVersion": "0.1.2-rc.1",
+  "desktopVersion": "0.2.5",
+  "manifest": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\repair-checks\\native-performance-backup-20260906T101747330484Z\\manifest.json",
+  "verifiedFiles": [
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\native\\dsh-native-helper.exe",
+      "sha256": "00b2d99996c6f120b9957ed07fb18c2d84146d797149f4d88c578033895a934a"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\native\\dsh_native_reader.node",
+      "sha256": "2a3fe3842759ce2131831907f825331b043cc5cb87d9e013a38b5d4bb2a324c2"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\native\\manifest.json",
+      "sha256": "cbf4e354a703f15ff51cea7ed2b3b15bc9d4fe592518b1c524dd3fa34e90707f"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\activation.js",
+      "sha256": "ece4c889dd1120b01fe505080de481e24980cf1221ef73a7fefdd0dbdd0d4cfd"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\addon.mjs",
+      "sha256": "78b60296019fa21b479ebcef5ae69ef1506c157c6869e5b47e50aa9959b0d1ec"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\client.mjs",
+      "sha256": "36bddd0207824972e593328b34602bb477653f0c42a615ad94fd39bd1b92c48b"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\persistence-plugin.mjs",
+      "sha256": "ea438c323d600efd67f5e1be6169006f253427574a2da3025785c6ed70568e99"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\persistence.mjs",
+      "sha256": "1477be0f1d3488cbf1f59914964ec067e0d626204d0f76d14fa5f26c86ae9b3c"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\runtime.mjs",
+      "sha256": "211ec13d71c06232b772099bbc4e4cf1c13beafed6ce8e977e1b7d0efc686912"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\session-text.mjs",
+      "sha256": "224d15416ec8371c72078832b58bab53e00b70463a297fe7fa98ae6a3032ace7"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\text.mjs",
+      "sha256": "c2826f371f86e7f2f262491ce469f1464d48fde8289df4b82220edf1c6c3539b"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\desktop\\native\\tools-plugin.mjs",
+      "sha256": "62c1ba911481e8efd995998eaf5a8fce4e4149def00b5a030165b5a2b81455e2"
+    },
+    {
+      "path": "C:\\Users\\34021\\.dsh\\profiles\\web\\node_modules\\dsh-memory-evolve\\lib\\advisor\\turn-tracker.js",
+      "sha256": "1cb5750075237ebf02b1959fd2fb424db176b8e431ea140bf86f8ef1933315ea"
+    },
+    {
+      "path": "C:\\Users\\34021\\.dsh\\profiles\\web\\node_modules\\dsh-memory-evolve\\lib\\advisor\\observer.js",
+      "sha256": "c8696f1a565e19ad2c9cc7aebb707b85d59baffd2f4488c16ac6ec40a6602f48"
+    },
+    {
+      "path": "C:\\Users\\34021\\.dsh\\profiles\\web\\node_modules\\dsh-memory-evolve\\lib\\advisor\\index.js",
+      "sha256": "b015f0aafb8b92274fbba643e6dc67cde17c34be99c5622ff7f0599070003502"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\repair-checks\\compat-changes.json",
+      "sha256": "7365d3204d9abf339975be5236959178e5c08efe571e4648093872270892b98f"
+    },
+    {
+      "path": "C:\\Users\\34021\\AppData\\Local\\DSH Desktop\\dsh-desktop.exe",
+      "sha256": "07555a28c7ee3870358d485e9bdca8c67c62bbecd814f752c6915307bce15da5"
+    }
+  ],
+  "sourcePayloadsMatchInstalledExceptBundleMarker": true,
+  "executableComparison": {
+    "sourceMarker": "UNK",
+    "installedMarker": "NSS",
+    "differentBytes": 3,
+    "equalOutsideBundleMarker": true,
+    "note": "Tauri bundle restores the build-tree executable bundle marker after packaging; the deployed NSIS-marked image is retained."
+  },
+  "backupHashesVerified": true,
+  "compatExitCode": 0,
+  "releaseBuild": {
+    "finishedAt": "2026-09-06T18:37:00.0011863+08:00",
+    "exitCode": 0
+  },
+  "installer": {
+    "path": "D:\\文件存放处\\code\\dsh desktop版 以及dsh插件制作\\dsh-desktop\\src-tauri\\target\\release\\bundle\\nsis\\DSH Desktop_0.2.5_x64-setup.exe",
+    "bytes": 55212607,
+    "sha256": "cb88757ef9d1e547ceb9eca22f95672fc157b4bca88c18476e2e27a781c80e35"
+  },
+  "buildTreeExecutableSha256": "477a95df8d7e6aee7422527dc846fe4c4ff0c936bde293d9087382766ddf3085",
+  "installedExecutableSha256": "07555a28c7ee3870358d485e9bdca8c67c62bbecd814f752c6915307bce15da5",
+  "activation": "No user process was forcibly stopped; new runtime activates on normal next launch."
+}
