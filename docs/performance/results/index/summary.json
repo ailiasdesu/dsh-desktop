@@ -1,0 +1,65 @@
+{
+  "initialBuild": {
+    "mode": "prepare",
+    "diskCacheControlled": false,
+    "coldProcess": true,
+    "queries": [
+      {
+        "session": "perf-large-0",
+        "round": 0,
+        "ms": 1799.9234
+      },
+      {
+        "session": "perf-large-1",
+        "round": 0,
+        "ms": 1496.3301000000001
+      },
+      {
+        "session": "perf-large-2",
+        "round": 0,
+        "ms": 1764.0283000000004
+      },
+      {
+        "session": "perf-large-3",
+        "round": 0,
+        "ms": 1336.2127999999993
+      },
+      {
+        "session": "perf-large-4",
+        "round": 0,
+        "ms": 1441.2927999999993
+      },
+      {
+        "session": "perf-large-5",
+        "round": 0,
+        "ms": 1397.8523999999998
+      }
+    ],
+    "memory": {
+      "rss": 309211136,
+      "heapTotal": 273911808,
+      "heapUsed": 184688728,
+      "external": 4660514,
+      "arrayBuffers": 2135375
+    },
+    "peakTotalPrivateMiB": 372.734375
+  },
+  "semantics": "case-folded literal per-event text, ascending seq; NOT ranked FTS",
+  "fixtures": "six 16 MiB synthetic text histories",
+  "variants": [
+    {
+      "mode": "official",
+      "queries": 60,
+      "p50Ms": 75.23930000000007,
+      "p95Ms": 115.97560000000004,
+      "medianPeakTotalPrivateMiB": 395.77734375
+    },
+    {
+      "mode": "native",
+      "queries": 60,
+      "p50Ms": 48.94870000000003,
+      "p95Ms": 577.8401000000001,
+      "medianPeakTotalPrivateMiB": 87.234375
+    }
+  ]
+}

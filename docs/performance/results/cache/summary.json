@@ -1,0 +1,88 @@
+{
+  "kind": "official-cache-policy-comparison",
+  "fixture": "synthetic highly compressible histories",
+  "repetitions": 5,
+  "processCold": true,
+  "diskCacheControlled": false,
+  "forcedGc": "between phases only, for retained-object diagnostics",
+  "variants": [
+    {
+      "cacheSize": 1,
+      "phases": {
+        "cold-sequence": {
+          "p50Ms": 60.93579999999997,
+          "p95Ms": 100.37440000000001,
+          "medianRetainedHeapMiB": 23.0362548828125
+        },
+        "hot-last": {
+          "p50Ms": 1.1384999999999081,
+          "p95Ms": 2.0919000000000096,
+          "medianRetainedHeapMiB": 23.05615234375
+        },
+        "hot-pair": {
+          "p50Ms": 50.47500000000002,
+          "p95Ms": 66.5213,
+          "medianRetainedHeapMiB": 23.199867248535156
+        },
+        "revisit-sequence": {
+          "p50Ms": 51.79790000000003,
+          "p95Ms": 73.47690000000011,
+          "medianRetainedHeapMiB": 23.222152709960938
+        }
+      },
+      "medianPeakPrivateMiB": 320.33984375
+    },
+    {
+      "cacheSize": 2,
+      "phases": {
+        "cold-sequence": {
+          "p50Ms": 64.31010000000003,
+          "p95Ms": 94.2577,
+          "medianRetainedHeapMiB": 39.854408264160156
+        },
+        "hot-last": {
+          "p50Ms": 1.225500000000011,
+          "p95Ms": 2.2509000000000015,
+          "medianRetainedHeapMiB": 39.874290466308594
+        },
+        "hot-pair": {
+          "p50Ms": 1.1662999999999784,
+          "p95Ms": 2.4272999999999456,
+          "medianRetainedHeapMiB": 39.87506103515625
+        },
+        "revisit-sequence": {
+          "p50Ms": 54.10170000000005,
+          "p95Ms": 70.39610000000005,
+          "medianRetainedHeapMiB": 40.019775390625
+        }
+      },
+      "medianPeakPrivateMiB": 319.484375
+    },
+    {
+      "cacheSize": 5,
+      "phases": {
+        "cold-sequence": {
+          "p50Ms": 67.7063,
+          "p95Ms": 94.1939,
+          "medianRetainedHeapMiB": 91.23291015625
+        },
+        "hot-last": {
+          "p50Ms": 1.2941000000000713,
+          "p95Ms": 4.045199999999909,
+          "medianRetainedHeapMiB": 91.257080078125
+        },
+        "hot-pair": {
+          "p50Ms": 1.0592000000000326,
+          "p95Ms": 2.4634999999999536,
+          "medianRetainedHeapMiB": 91.253662109375
+        },
+        "revisit-sequence": {
+          "p50Ms": 50.95190000000002,
+          "p95Ms": 70.80309999999997,
+          "medianRetainedHeapMiB": 90.42870330810547
+        }
+      },
+      "medianPeakPrivateMiB": 412.84765625
+    }
+  ]
+}

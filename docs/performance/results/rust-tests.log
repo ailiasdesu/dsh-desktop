@@ -1,0 +1,35 @@
+   Compiling dsh-native-helper v0.1.0 (D:\文件存放处\code\dsh desktop版 以及dsh插件制作\dsh-desktop\native-helper)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.04s
+     Running unittests src\lib.rs (native-helper\target\debug\deps\dsh_native_helper-5ec063873b6e7f7a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (native-helper\target\debug\deps\dsh_native_helper-bc293f1c3c1e74cd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\protocol.rs (native-helper\target\debug\deps\protocol-c043b3fa338f1675.exe)
+
+running 10 tests
+test protocol_roundtrip_and_version_refusal ... ok
+test hello_and_file_operations_do_not_open_the_index_database ... ok
+test bounded_and_truncated_framing_fail_closed ... ok
+test file_hash_empty_unicode_and_scope ... ok
+test import_rejects_out_of_order_without_partial_batch ... ok
+test future_database_schema_is_refused_without_overwriting_it ... ok
+test concurrent_cache_writer_cannot_publish_over_a_changed_revision ... ok
+test incremental_revision_checks_and_suffix_replacement ... ok
+test repeat_queries_unicode_literals_and_global_limit ... ok
+test replacement_is_atomic_and_survives_restart ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+   Doc-tests dsh_native_helper
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

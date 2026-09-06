@@ -1,0 +1,15 @@
+✔ real helper lazy start, Unicode files, bounded import and incremental replacement (1238.2597ms)
+✔ idle process exits and committed index is reusable after lazy restart (177.5433ms)
+✔ invalid revision, oversized frame and aborted requests do not publish partial state (95.1118ms)
+✔ startup failure rejects promptly and close prevents restart (4.6461ms)
+✔ in-flight abort ends a native operation and leaves the client restartable (52.8479ms)
+✔ official persisted events, Unicode search, cache revision and helper failure fallback (697.542ms)
+✔ live appends are incremental and unknown kernel bypasses the helper (439.7449ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1678.4911
