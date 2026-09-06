@@ -17,6 +17,10 @@
 
 The final helper subsequently gained lazy DB opening and cache/import limits. Repeat affected benchmarks before promotion; do not automatically transfer earlier numbers to a newer binary.
 
+`results/files/summary.json`: final lazy-DB helper, five fresh processes per variant and three SHA256 checks each on a 256 MiB synthetic file. Streaming Node baseline was included: p95 385.84 ms and median peak total private memory 124.93 MiB; native 219.61 ms and 55.00 MiB. Whole-buffer Node was 381.80 ms and 566.13 MiB. All hashes matched. OS cache was uncontrolled and these are file-tool primitives, not attachment UI measurements. The native file path has a Windows opened-handle containment check; using it as a general DSH tool still requires preserving the official filesystem/permission boundary rather than bypassing it.
+
+Latest verification: 10 Rust tests and 7 Node/official-service integration tests passed. Current helper is approximately 2 MiB. Commit `8ba6914` records the first implementation and search/cache evidence; file benchmarks are a subsequent checkpoint. No production configuration, original session file, or running desktop has been changed by this route implementation.
+
 ## Still required
 
 1. Integrate native functions into real desktop/plugin user and agent entry points, preserving existing actions; presently these are executable/tested modules, not installed features.

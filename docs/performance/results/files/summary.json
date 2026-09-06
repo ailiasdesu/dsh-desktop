@@ -1,0 +1,26 @@
+{
+  "fileBytes": 268435456,
+  "processCold": true,
+  "diskCacheControlled": false,
+  "repetitions": 5,
+  "variants": [
+    {
+      "mode": "buffer",
+      "p50Ms": 259.52959999999996,
+      "p95Ms": 381.8040000000001,
+      "medianPeakTotalPrivateMiB": 566.125
+    },
+    {
+      "mode": "stream",
+      "p50Ms": 296.5589,
+      "p95Ms": 385.8363,
+      "medianPeakTotalPrivateMiB": 124.92578125
+    },
+    {
+      "mode": "native",
+      "p50Ms": 183.54529999999997,
+      "p95Ms": 219.60629999999998,
+      "medianPeakTotalPrivateMiB": 54.99609375
+    }
+  ]
+}

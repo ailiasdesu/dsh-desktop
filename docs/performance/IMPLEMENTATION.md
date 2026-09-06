@@ -7,8 +7,8 @@ Branch: `perf/rust-data-path`. Existing proxy-DNS changes in the working tree pr
 | Unit | Owned files | Acceptance | State |
 |---|---|---|---|
 | Baseline and cache policy | scripts/performance/*, docs/performance/results/* | Official backend; small/medium/large fixtures; cache 1/2/5 comparison; process and heap measurements; cold/hot distinguished | in progress |
-| Rust helper | native-helper/* | Bounded streaming I/O, independent index, incremental transactions, cancellation/failure tests, no writes to original logs | pending |
-| Desktop bridge | desktop/native/* | Lazy single child, bounded IPC, lifecycle shutdown, unknown-version fallback, same result contract | pending |
+| Rust helper | native-helper/* | Bounded streaming I/O, independent index, incremental transactions, cancellation/failure tests, no writes to original logs | implemented base; large-document/cache eviction work remains |
+| Desktop bridge | desktop/native/* | Lazy single child, bounded IPC, lifecycle shutdown, unknown-version fallback, same result contract | implemented and tested library; production plugin integration remains |
 | Plugin integration | selected external plugin sources and desktop adapter | Incremental statistics/search/file processing actually used, no feature loss; integration evidence | pending |
 | Session read path | versioned desktop adapter, official boundary tests | Less intermediate allocation; packed/provenance/repair/unknown-version parity; no private cache deletion | pending |
 | Packaging and deployment | src-tauri resource/build entries, installation manifest | Source and installed artifacts match, helper lifecycle owned, rollback works | pending |
