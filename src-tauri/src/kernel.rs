@@ -328,6 +328,11 @@ pub fn spawn_kernel(
         "web"
     };
     let mut cmd = Command::new(&res.node);
+    // 防 HTTP 431：Node HTTP 默认 maxHeaderSize=16KB，WebView 向 127.0.0.1 累积的认证
+    // cookie（历史崩溃重启时逐个写入、从不清理）一超过 16KB，内核直接回 431。这里把
+    // 请求头上限提到 64KB（Node 启动选项必须在 bin.js 之前，且不可经 NODE_OPTIONS 注入）。
+    // 配合桌面壳启动时的 cookie 清理（cleanup_stale_cookies）双保险根治。
+    cmd.arg("--max-http-header-size=65536");
     cmd.arg(&res.bin);
     if profile == "web" {
         cmd.arg("web");
@@ -429,6 +434,10 @@ pub fn run_shell(app: tauri::AppHandle, ctl: KernelCtl, smoke: bool, data_dir: &
             }
         };
         let root = repo_root(&exe_dir);
+        // 防 HTTP 431（双保险之二）：清掉 WebView2 里挂在 127.0.0.1 上的陈旧认证 cookie。
+        // 这些 cookie 是历史内核崩溃重启时逐个写入、从不清理累积的，单值总和一超过
+        // 16KB 就会让内核回 431。仅在本地 cookie 库可达（非独占锁定）时尝试，失败静默。
+        cleanup_stale_cookies();
         let quit_js = root.join("desktop").join("quit.js");
         let health_js = root.join("desktop").join("health.js");
         if let Err(e) = write_patch(&res.patch, &quit_js, &health_js) {
@@ -811,6 +820,46 @@ fn show_or_redirect(app: &tauri::AppHandle, url: &str) {
         let _ = tx.send(ok);
     });
     let _ = rx.recv_timeout(Duration::from_secs(5));
+}
+
+/// 防 HTTP 431（双保险之二）：清掉 WebView2 里挂在 127.0.0.1 上的陈旧认证 cookie。
+///
+/// 背景：DSH 内核此前因 profile bundle 缺失（见 dsh-desktop-profile-bundle-crash）反复崩溃
+/// 重启，每次重启都会经 launch token 向同一个 127.0.0.1 主机再写一个认证 cookie，旧的从不
+/// 清理。WebView2 按主机名（而非端口）聚合 cookie，故这些 cookie 不随端口变化而迁移，一路
+/// 累积到 Node HTTP 默认 16KB 的 maxHeaderSize 之上，内核便对每个请求回 431。
+///
+/// 策略（零依赖、可回滚）：此函数在内核 spawn 前的窗口内运行（旧 WebView 已退出、新 WebView
+/// 尚未启动，Cookie 库未被独占锁定）。若本地 Cookie 库确实记录了 127.0.0.1 主机键，就把
+/// Cookies 库及其 journal 复制为 .431-bak 后删除，交由 WebView2 重建一份干净库（只回退本地
+/// 认证 cookie，不影响第三方站点会话）。任何一步失败都静默跳过——宁可留着 cookie 让
+/// maxHttpHeaderSize 兜底，也不在这里引入启动失败。
+fn cleanup_stale_cookies() {
+    if !cfg!(windows) {
+        return;
+    }
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let base = PathBuf::from(local).join("com.dshdesktop.app").join("EBWebView");
+    let network = base.join("Default").join("Network");
+    let cookies = network.join("Cookies");
+    let journal = network.join("Cookies-journal");
+    // 读 cookie 库，仅当其中含 "127.0.0.1" 主机键时才触发清理
+    let Ok(bytes) = std::fs::read(&cookies) else {
+        return; // 被锁定或不存在：留给 maxHttpHeaderSize 兜底
+    };
+    if !bytes.windows("127.0.0.1".len()).any(|w| w == b"127.0.0.1") {
+        return; // 无 127.0.0.1 残留，无需清理
+    }
+    // 备份后删除（journal 一并处理，避免残留锁文件）
+    for f in [&cookies, &journal] {
+        if f.exists() {
+            let bak = f.with_extension("431-bak");
+            let _ = std::fs::rename(f, &bak);
+        }
+    }
+    eprintln!("[kernel] cleaned dormant 127.0.0.1 cookies (maxHeaderSize raised as fallback)");
 }
 
 #[cfg(test)]
